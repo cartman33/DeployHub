@@ -16,6 +16,38 @@ import {
 } from "./Icons";
 import { getMainVersionDetail, getPackagingEligibility, createPackageJob, getPackageJob, retryPackageJob, getChangedComponents } from "./api";
 
+// 클립보드 복사 유틸리티 함수 (http 환경 등 navigator.clipboard가 없는 경우를 위한 폴백 포함)
+const copyToClipboard = async (text) => {
+  // navigator.clipboard API 시도 (HTTPS 또는 localhost 환경)
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (err) {
+      console.warn("Clipboard API failed, trying fallback...", err);
+    }
+  }
+  
+  // Fallback: document.execCommand('copy') 사용
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed"; // fixed로 설정하여 스크롤 이동 방지
+    textArea.style.left = "-999999px";
+    textArea.style.top = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    const successful = document.execCommand('copy');
+    textArea.remove();
+    return successful;
+  } catch (err) {
+    console.error("Fallback clipboard copy failed", err);
+    return false;
+  }
+};
+
 export const DeploymentPipelineDashboardSection = ({ 
   versions, 
   selectedVersionName, 
@@ -257,7 +289,7 @@ export const DeploymentPipelineDashboardSection = ({
       .join("\n");
 
     if (urls) {
-      await navigator.clipboard.writeText(urls);
+      await copyToClipboard(urls);
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1800);
     } else {
@@ -480,7 +512,7 @@ export const DeploymentPipelineDashboardSection = ({
                 </div>
                 <button 
                   onClick={() => {
-                    navigator.clipboard.writeText(res.imageTag || "");
+                    copyToClipboard(res.imageTag || "");
                   }}
                   className="p-3 text-slate-400 hover:text-indigo-600 transition-colors bg-white rounded-lg border border-slate-100 group-hover:border-indigo-100"
                 >

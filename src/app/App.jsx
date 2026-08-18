@@ -1,28 +1,37 @@
-// React의 핵심 훅(Hook)들을 불러옵니다.
-// useState: 변하는 데이터(상태)를 관리하기 위함
-// useEffect: 컴포넌트가 화면에 나타날 때(mount) 특정 동작(API 호출 등)을 수행하기 위함
+// React의 상태 관리 및 생명주기 훅을 불러옵니다.
 import { useState, useEffect } from "react";
+// 사용되는 아이콘 컴포넌트들을 불러옵니다.
 import { 
   RocketIcon, 
-  DashboardIcon, 
-  SettingsIcon,
-  CodeIcon,
-  BellIcon
+  CodeIcon
 } from "../components/ui/Icons";
+// 배포자 모드 및 개발자 모드 대시보드 컴포넌트를 불러옵니다.
 import { DeploymentPipelineDashboardSection } from "../features/deployer/DeploymentPipelineDashboardSection";
 import { DeveloperVersionRegistrationSection } from "../features/developer/DeveloperVersionRegistrationSection";
-import { listMainVersions, registryHealth, sharepointHealth } from "../services/api";
+// 백엔드 API 호출 함수들을 불러옵니다.
+import { listMainVersions, registryHealth, onedriveHealth } from "../services/api";
 
+// 불필요한 배열 생성을 방지하기 위한 기본 빈 배열입니다.
 const defaultVersions = [];
 
+/**
+ * 앱의 메인 레이아웃 및 상태를 관리하는 최상위 컴포넌트입니다.
+ */
 export const HtmlBody = () => {
+  // 현재 활성화된 네비게이션 모드를 관리합니다 ('deployer' 또는 'developer').
   const [activeNavigation, setActiveNavigation] = useState("deployer");
+  // 메인 버전 목록 데이터를 관리합니다.
   const [versions, setVersions] = useState(defaultVersions);
+  // 현재 선택된 버전의 이름을 관리합니다.
   const [selectedVersionName, setSelectedVersionName] = useState("");
+  // 버전 목록 로딩 상태를 관리합니다.
   const [loadingVersions, setLoadingVersions] = useState(true);
+  // 버전 목록 로드 중 발생한 에러 메시지를 관리합니다.
   const [versionError, setVersionError] = useState("");
 
-  // 버전 목록을 백엔드에서 불러오는 비동기(async) 함수입니다.
+  /**
+   * 백엔드에서 메인 버전 목록을 불러오는 비동기 함수입니다.
+   */
   const loadVersions = async (keyword = "") => {
     setLoadingVersions(true);
     setVersionError("");
@@ -31,49 +40,73 @@ export const HtmlBody = () => {
       const searchStr = typeof keyword === 'string' ? keyword : "";
       const response = await listMainVersions(searchStr, 0, 50);
       const items = response?.items || [];
+      // 버전 이름을 기준으로 최신순 정렬을 수행합니다.
+      items.sort((a, b) => {
+        const [aDate, aSuf] = a.versionName.split('-');
+        const [bDate, bSuf] = b.versionName.split('-');
+        if (aDate !== bDate) {
+          return bDate.localeCompare(aDate);
+        }
+        const aNum = parseInt(aSuf || "1", 10);
+        const bNum = parseInt(bSuf || "1", 10);
+        return bNum - aNum;
+      });
       setVersions(items);
+      // 선택된 버전이 없고 목록이 존재하면 첫 번째 버전을 기본값으로 설정합니다.
       if (!selectedVersionName && items.length > 0) {
         setSelectedVersionName(items[0].versionName);
       }
     } catch (error) {
+      // 에러 발생 시 사용자에게 보여줄 메시지를 설정합니다.
       setVersionError(error.payload?.message || error.message || "메인버전 목록을 불러오는 중 오류가 발생했습니다.");
     } finally {
       setLoadingVersions(false);
     }
   };
 
+  // NCR(네이버 클라우드 레지스트리) 연결 상태를 관리합니다.
   const [ncrStatus, setNcrStatus] = useState("checking");
-  const [spStatus, setSpStatus] = useState("checking");
+  // 원드라이브(OneDrive) 연결 상태를 관리합니다.
+  const [odStatus, setOdStatus] = useState("checking");
 
+  // 컴포넌트 마운트 시 초기 데이터를 불러오고 연결 상태를 확인합니다.
   useEffect(() => {
-    //메모리 누수(Mermory Leak) 방지를 위한 플래그 변수 
+    // 메모리 누수 방지를 위한 플래그 변수입니다.
     let mounted = true;
 
-    if (mounted) {
-      loadVersions();
+    // 초기 버전 목록을 불러옵니다.
+    loadVersions();
+    
+    // NCR 헬스 체크를 수행하고 상태를 업데이트합니다.
+    registryHealth()
+      .then(() => mounted && setNcrStatus("connected"))
+      .catch(() => mounted && setNcrStatus("disconnected"));
       
-      registryHealth()
-        .then(() => mounted && setNcrStatus("connected"))
-        .catch(() => mounted && setNcrStatus("disconnected"));
-        
-      sharepointHealth()
-        .then(() => mounted && setSpStatus("connected"))
-        .catch(() => mounted && setSpStatus("disconnected"));
-    }
+    // 원드라이브 헬스 체크를 수행하고 상태를 업데이트합니다.
+    onedriveHealth()
+      .then(() => mounted && setOdStatus("connected"))
+      .catch(() => mounted && setOdStatus("disconnected"));
 
+    // 컴포넌트 언마운트 시 플래그를 해제합니다.
     return () => {
       mounted = false;
     };
   }, []);
 
   return (
+    // 전체 화면 레이아웃을 구성하는 최상위 컨테이너
     <div className="flex min-h-screen bg-[#f8fafc] font-sans">
-      {/* Main Content Area - Responsive Flex-Grow */}
+      {/* 메인 콘텐츠 영역 */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header - Full Width relative to content area */}
+        {/* 상단 헤더 영역 */}
         <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b border-[#e0e4ec] bg-white px-8 shadow-sm">
           <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
+            {/* 로고 및 새로고침 버튼 */}
+            <button 
+              onClick={() => window.location.reload()}
+              className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer text-left focus:outline-none"
+            >
+              {/* 활성화된 모드에 따라 아이콘을 다르게 표시합니다. */}
               {activeNavigation === "deployer" ? (
                 <RocketIcon className="w-6 h-6 text-[#000666]" />
               ) : (
@@ -82,11 +115,11 @@ export const HtmlBody = () => {
               <h1 className="text-xl font-bold tracking-tight text-[#000666]">
                 Deploy Hub
               </h1>
-            </div>
+            </button>
           </div>
 
           <div className="flex items-center gap-6">
-            {/* Mode Switcher */}
+            {/* 모드 전환 스위처 */}
             <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shadow-inner">
               <button
                 onClick={() => setActiveNavigation("deployer")}
@@ -106,10 +139,12 @@ export const HtmlBody = () => {
               </button>
             </div>
 
+            {/* 구분선 */}
             <div className="h-6 w-px bg-slate-300"></div>
 
-            {/* Connection Status Badges - Made smaller as requested */}
+            {/* 연결 상태 뱃지 영역 */}
             <div className="flex items-center gap-2">
+              {/* NCR 연결 상태 뱃지 */}
               <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${
                 ncrStatus === "connected" ? "bg-green-50 border-green-200" :
                 ncrStatus === "checking" ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"
@@ -123,30 +158,35 @@ export const HtmlBody = () => {
                   ncrStatus === "checking" ? "text-amber-700" : "text-red-700"
                 }`}>NCR {ncrStatus === "connected" ? "연결됨" : ncrStatus === "checking" ? "확인 중" : "연결 안됨"}</span>
               </div>
+              
+              {/* 원드라이브 연결 상태 뱃지 */}
               <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${
-                spStatus === "connected" ? "bg-green-50 border-green-200" :
-                spStatus === "checking" ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"
+                odStatus === "connected" ? "bg-green-50 border-green-200" :
+                odStatus === "checking" ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"
               }`}>
                 <div className={`w-1.5 h-1.5 rounded-full ${
-                  spStatus === "connected" ? "bg-green-500" :
-                  spStatus === "checking" ? "bg-amber-500 animate-pulse" : "bg-red-500"
+                  odStatus === "connected" ? "bg-green-500" :
+                  odStatus === "checking" ? "bg-amber-500 animate-pulse" : "bg-red-500"
                 }`}></div>
                 <span className={`text-[11px] font-bold tracking-wide ${
-                  spStatus === "connected" ? "text-green-700" :
-                  spStatus === "checking" ? "text-amber-700" : "text-red-700"
-                }`}>SHAREPOINT {spStatus === "connected" ? "연결됨" : spStatus === "checking" ? "확인 중" : "연결 안됨"}</span>
+                  odStatus === "connected" ? "text-green-700" :
+                  odStatus === "checking" ? "text-amber-700" : "text-red-700"
+                }`}>ONEDRIVE {odStatus === "connected" ? "연결됨" : odStatus === "checking" ? "확인 중" : "연결 안됨"}</span>
               </div>
             </div>
           </div>
         </header>
 
-        {/* Dynamic Content Area - Responsive Width */}
+        {/* 동적 콘텐츠 영역 */}
         <main className="flex-1 flex flex-col relative">
+          {/* 에러 메시지 표시 영역 */}
           {versionError && (
             <div className="mx-8 my-4 shrink-0 rounded-2xl border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700 shadow-sm">
               {versionError}
             </div>
           )}
+          
+          {/* 활성화된 모드에 따라 해당하는 섹션을 렌더링합니다. */}
           {activeNavigation === "deployer" ? (
             <DeploymentPipelineDashboardSection 
               versions={versions}

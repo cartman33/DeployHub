@@ -1,60 +1,75 @@
+/* Tailwind의 기본 스타일(초기화)을 포함합니다. */
 @tailwind base;
+/* Tailwind의 컴포넌트 클래스를 포함합니다. */
 @tailwind components;
+/* Tailwind의 유틸리티 클래스를 포함합니다. */
 @tailwind utilities;
 
+/* 기본 HTML 요소에 대한 커스텀 스타일을 정의합니다. */
 @layer base {
+  /* 버튼, 입력창, 선택창, 텍스트 영역의 기본 브라우저 스타일을 제거하고 투명한 배경을 적용합니다. */
   button,
   input,
   select,
   textarea {
     @apply appearance-none bg-transparent border-0 outline-none;
   }
-}
-
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-@layer base {
+  
+  /* 요소의 모든 기본 스타일을 초기화하는 커스텀 클래스입니다. */
   .all-unset {
     all: unset;
   }
 }
 
+/* CSS 변수를 사용하여 애니메이션 기본값을 설정합니다. */
 :root {
+  /* 회전 애니메이션의 기본값을 정의합니다. */
   --animate-spin: spin 1s linear infinite;
 }
 
+/* 
+ * 아래 애니메이션들은 현재 코드베이스에서 사용되지 않는 것으로 보이나,
+ * 향후 사용을 위해 유지합니다.
+ */
+
+/* 페이드 인 효과 애니메이션 클래스입니다. (미사용 추정) */
 .animate-fade-in {
   animation: fade-in 1s var(--animation-delay, 0s) ease forwards;
 }
 
+/* 아래에서 위로 올라오는 페이드 효과 애니메이션 클래스입니다. (미사용 추정) */
 .animate-fade-up {
   animation: fade-up 1s var(--animation-delay, 0s) ease forwards;
 }
 
+/* 가로 방향으로 흘러가는 텍스트 효과 애니메이션 클래스입니다. (미사용 추정) */
 .animate-marquee {
   animation: marquee var(--duration) infinite linear;
 }
 
+/* 세로 방향으로 흘러가는 텍스트 효과 애니메이션 클래스입니다. (미사용 추정) */
 .animate-marquee-vertical {
   animation: marquee-vertical var(--duration) linear infinite;
 }
 
+/* 빛이 반짝이는 듯한 효과를 주는 시머 애니메이션 클래스입니다. (미사용 추정) */
 .animate-shimmer {
   animation: shimmer 8s infinite;
 }
 
+/* 회전하는 애니메이션 클래스입니다. (로딩 스피너 등에 주로 사용됨) */
 .animate-spin {
   animation: var(--animate-spin);
 }
 
+/* 360도 회전하는 키프레임 정의입니다. */
 @keyframes spin {
   to {
     transform: rotate(1turn);
   }
 }
 
+/* 이미지에 빛이 나는 듯한 효과를 주는 키프레임 정의입니다. (미사용 추정) */
 @keyframes image-glow {
   0% {
     opacity: 0;
@@ -71,6 +86,7 @@
   }
 }
 
+/* 투명도와 위치를 조절하여 부드럽게 나타나는 키프레임 정의입니다. */
 @keyframes fade-in {
   0% {
     opacity: 0;
@@ -83,6 +99,7 @@
   }
 }
 
+/* 아래에서 위로 이동하며 나타나는 키프레임 정의입니다. */
 @keyframes fade-up {
   0% {
     opacity: 0;
@@ -95,6 +112,7 @@
   }
 }
 
+/* 배경의 위치를 이동시켜 반짝이는 효과를 만드는 키프레임 정의입니다. */
 @keyframes shimmer {
   0%,
   90%,
@@ -108,6 +126,7 @@
   }
 }
 
+/* 가로로 끝없이 이동하는 마키 효과 키프레임 정의입니다. */
 @keyframes marquee {
   0% {
     transform: translate(0);
@@ -118,6 +137,7 @@
   }
 }
 
+/* 세로로 끝없이 이동하는 마키 효과 키프레임 정의입니다. */
 @keyframes marquee-vertical {
   0% {
     transform: translateY(0);
