@@ -93,15 +93,16 @@ export async function createMainVersion(versionName, payload = {}) {
 }
 
 /**
- * 특정 메인 버전에 서브 버전 데이터를 추가하거나 기존 데이터를 업데이트(Upsert)합니다.
+ * 특정 메인 버전에 서브 버전 1건을 등록하거나 수정(Upsert)합니다.
+ * 상태 변경도 이 API를 통해 한 번에 처리됩니다.
  * 
- * @param {string} versionName - 서브 버전을 귀속시킬 메인 버전의 이름
+ * @param {string} versionName - 메인 버전 이름
+ * @param {string} code - 서브 버전 코드
  * @param {Object} payload - 업서트할 서브 버전의 세부 데이터
  * @returns {Promise<any>} - 처리 결과 응답
  */
-export async function upsertSubVersions(versionName, payload) {
-  // PUT 요청으로 데이터를 덮어씁니다. URL에 들어가는 버전 이름은 안전하게 인코딩합니다.
-  return request(`/main-versions/${encodeURIComponent(versionName)}/sub-versions`, {
+export async function upsertSubVersion(versionName, code, payload) {
+  return request(`/main-versions/${encodeURIComponent(versionName)}/sub-versions/${encodeURIComponent(code)}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
@@ -115,10 +116,7 @@ export async function upsertSubVersions(versionName, payload) {
  * @throws {Error} - 버전 이름이 누락된 경우 예외 발생
  */
 export async function getMainVersionDetail(versionName) {
-  // 안전한 API 호출을 위한 필수 파라미터 검증
   if (!versionName) throw new Error("versionName is required");
-  
-  // GET 요청으로 상세 정보를 호출합니다.
   return request(`/main-versions/${encodeURIComponent(versionName)}`);
 }
 
@@ -130,26 +128,8 @@ export async function getMainVersionDetail(versionName) {
  * @throws {Error} - 버전 이름이 누락된 경우 예외 발생
  */
 export async function getPackagingEligibility(versionName) {
-  // 필수 파라미터 검증
   if (!versionName) throw new Error("versionName is required");
-  
-  // GET 요청으로 패키징 조건을 충족하는지 검증하는 엔드포인트를 호출합니다.
   return request(`/main-versions/${encodeURIComponent(versionName)}/packaging-eligibility`);
-}
-
-/**
- * 서브 버전의 제출(Submit) 상태를 변경합니다.
- * 
- * @param {string} id - 상태를 변경할 서브 버전의 고유 식별자(ID)
- * @param {Object} payload - 업데이트할 상태 정보를 담은 객체
- * @returns {Promise<any>} - 상태 업데이트 결과
- */
-export async function changeSubmitStatus(id, payload) {
-  // PATCH 요청을 사용하여 전체 리소스가 아닌 일부 상태만 부분 업데이트합니다.
-  return request(`/sub-versions/${encodeURIComponent(id)}/submit-status`, {
-    method: "PATCH",
-    body: JSON.stringify(payload),
-  });
 }
 
 /**

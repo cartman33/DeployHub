@@ -8,6 +8,7 @@ import {
 // 배포자 모드 및 개발자 모드 대시보드 컴포넌트를 불러옵니다.
 import { DeploymentPipelineDashboardSection } from "../features/deployer/DeploymentPipelineDashboardSection";
 import { DeveloperVersionRegistrationSection } from "../features/developer/DeveloperVersionRegistrationSection";
+import { JobManagementPage } from "../features/job/JobManagementPage";
 // 백엔드 API 호출 함수들을 불러옵니다.
 import { listMainVersions, registryHealth, onedriveHealth } from "../services/api";
 
@@ -18,7 +19,7 @@ const defaultVersions = [];
  * 앱의 메인 레이아웃 및 상태를 관리하는 최상위 컴포넌트입니다.
  */
 export const HtmlBody = () => {
-  // 현재 활성화된 네비게이션 모드를 관리합니다 ('deployer' 또는 'developer').
+  // 현재 활성화된 네비게이션 모드를 관리합니다 ('deployer' 또는 'developer', 'job_management').
   const [activeNavigation, setActiveNavigation] = useState("deployer");
   // 메인 버전 목록 데이터를 관리합니다.
   const [versions, setVersions] = useState(defaultVersions);
@@ -109,8 +110,10 @@ export const HtmlBody = () => {
               {/* 활성화된 모드에 따라 아이콘을 다르게 표시합니다. */}
               {activeNavigation === "deployer" ? (
                 <RocketIcon className="w-6 h-6 text-[#000666]" />
-              ) : (
+              ) : activeNavigation === "developer" ? (
                 <CodeIcon className="w-5 h-5 text-[#000666]" />
+              ) : (
+                <span className="text-xl">🛠️</span>
               )}
               <h1 className="text-xl font-bold tracking-tight text-[#000666]">
                 Deploy Hub
@@ -137,6 +140,14 @@ export const HtmlBody = () => {
               >
                 <span>👨‍💻</span> 개발자 모드
               </button>
+              <button
+                onClick={() => setActiveNavigation("job_management")}
+                className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all flex items-center gap-1.5 ${
+                  activeNavigation === "job_management" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                <span>🛠️</span> Job 관리
+              </button>
             </div>
 
             {/* 구분선 */}
@@ -149,8 +160,8 @@ export const HtmlBody = () => {
                 ncrStatus === "connected" ? "bg-green-50 border-green-200" :
                 ncrStatus === "checking" ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"
               }`}>
-                <div className={`w-1.5 h-1.5 rounded-full ${
-                  ncrStatus === "connected" ? "bg-green-500" :
+                <div className={`w-2 h-2 rounded-full ${
+                  ncrStatus === "connected" ? "bg-green-500 animate-pulse" :
                   ncrStatus === "checking" ? "bg-amber-500 animate-pulse" : "bg-red-500"
                 }`}></div>
                 <span className={`text-[11px] font-bold tracking-wide ${
@@ -164,8 +175,8 @@ export const HtmlBody = () => {
                 odStatus === "connected" ? "bg-green-50 border-green-200" :
                 odStatus === "checking" ? "bg-amber-50 border-amber-200" : "bg-red-50 border-red-200"
               }`}>
-                <div className={`w-1.5 h-1.5 rounded-full ${
-                  odStatus === "connected" ? "bg-green-500" :
+                <div className={`w-2 h-2 rounded-full ${
+                  odStatus === "connected" ? "bg-green-500 animate-pulse" :
                   odStatus === "checking" ? "bg-amber-500 animate-pulse" : "bg-red-500"
                 }`}></div>
                 <span className={`text-[11px] font-bold tracking-wide ${
@@ -194,13 +205,15 @@ export const HtmlBody = () => {
               setSelectedVersionName={setSelectedVersionName}
               reloadVersions={loadVersions}
             />
-          ) : (
+          ) : activeNavigation === "developer" ? (
             <DeveloperVersionRegistrationSection 
               versions={versions}
               setVersions={setVersions}
               setSelectedVersionName={setSelectedVersionName}
               setActiveNavigation={setActiveNavigation}
             />
+          ) : (
+            <JobManagementPage />
           )}
         </main>
       </div>

@@ -7,7 +7,7 @@ import {
   ChevronDownIcon // 드롭다운 화살표 아이콘
 } from "../../components/ui/Icons"; // UI 아이콘 컴포넌트 임포트
 import { AlertModal } from "../../components/ui/AlertModal"; // 경고 모달 컴포넌트 임포트
-import { createMainVersion, getMainVersionDetail, upsertSubVersions, changeSubmitStatus, updateMainVersion } from "../../services/api"; // API 호출 함수 임포트
+import { createMainVersion, getMainVersionDetail, upsertSubVersion, updateMainVersion } from "../../services/api"; // API 호출 함수 임포트
 
 // ==========================================
 // [Utility & Constants] 
@@ -380,39 +380,121 @@ export const DeveloperVersionRegistrationSection = ({
   };
 
   /**
-   * 폼 입력 내용(서브버전, SQL, 릴리즈 노트)을 완전히 초기화하는 핸들러
+   * 신규 메인버전을 등록하고, 가장 최신의 매니페스트 데이터를 불러와 폼을 세팅하는 핸들러 (분리된 API 흐름)
    */
-  const handleReset = () => {
-    const isConfirmed = window.confirm("비우기 클릭 시 모든 상세 입력 내용이 삭제됩니다. 계속하시겠습니까?"); // 사용자 확인
-    if (isConfirmed) {
-      // 행 데이터들을 초기 상태의 값으로 리셋
-      setRows(rows.map(r => {
-        const defaultMatch = defaultRows.find(dr => dr.subVersion.toUpperCase() === r.subVersion.toUpperCase()); // 기본 제공 컴포넌트인지 확인
-        const resetComponent = defaultMatch ? defaultMatch.component : ""; // 기본 컴포넌트 값이 있으면 복원
-        return { ...r, component: resetComponent, tag: "", note: "", status: "unchanged" }; // 태그, 노트 등 모두 비움
-      }));
-      setSqlScript(""); // SQL 비움
-      setReleaseNote(""); // 릴리즈노트 비움
-    }
-  };
+  const handleRegisterMainVersion = async () => {
+    const prefix = selectedDate.replace(/-/g, '.');
+    const targetVersionName = `${prefix}-${maxSuffix + 1}`;
+    setSaving(true);
+    setSubmitError("");
+    
+    try {
+      // 1. 백엔드에 신규 메인 버전 등록 API 호출
+      await createMainVersion(targetVersionName, {
+        releaseNote: releaseNote || undefined,
+        sqlScript: sqlScript || undefined,
+      });
 
-  /**
-   * 현재 모드(신규/수정)의 baseline 데이터를 서버에서 다시 불러와서 덮어쓰는 새로고침 핸들러
-   */
-  const handleReload = () => {
-    const isConfirmed = window.confirm(
-      modeType === "new" 
-        ? "최신 버전의 데이터를 다시 불러오시겠습니까? 현재 입력된 내용은 덮어쓰기 됩니다."
-        : "선택한 버전의 원본 데이터를 다시 불러오시겠습니까? 현재 변경사항은 덮어쓰기 됩니다."
-    ); // 사용자 확인
-    if (isConfirmed) {
-      loadBaseline(); // baseline 재로딩 수행
+      // 2. 가장 최신 버전의 서브버전(매니페스트)들을 템플릿으로 불러옴
+      const baselineSummary = availableVersions.length > 0 ? availableVersions[0] : versions[0];
+      let detail = null;
+      if (baselineSummary) {
+         detail = await getMainVersionDetail(baselineSummary.versionName);
+      }
+      
+      // 3. 서브버전 목록 설정 (신규 등록이므로 forcePending=true, clearNotes=true로 설정)
+      if (detail) {
+        setRows(buildRowsFromDetail(detail, true, true));
+      } else {
+        setRows([...defaultRows]);
+      }
+      
+      // 4. 컨텍스트의 버전 목록 상태 갱신
+      const newSummary = {
+        versionName: targetVersionName,
+        subVersionCount: 0,
+        componentCount: 0,
+        lastJob: null,
+      };
+      setVersions([newSummary, ...versions]);
+      setSelectedVersionName(targetVersionName);
+      
+      // 5. 모드를 '수정' 모드로 변경하여 매니페스트 편집 활성화
+      setModeType("edit");
+      setEditVersionMode((maxSuffix + 1).toString());
+      
+      setAlertMessage(`신규 메인버전(${targetVersionName})이 등록되었습니다. 아래에서 매니페스트 상세 정보를 작성 후 각각 저장해주세요.`);
+    } catch (error) {
+      if (error.status !== 409) {
+        const message = error.payload?.message || error.message || "메인버전 등록 중 오류가 발생했습니다.";
+        setSubmitError(message);
+        setAlertMessage(message);
+      } else {
+        // 이미 등록된 경우 모드만 변경
+        setModeType("edit");
+        setEditVersionMode((maxSuffix + 1).toString());
+        setAlertMessage("이미 등록된 버전입니다. 수정 모드로 전환되었습니다.");
+      }
+    } finally {
+      setSaving(false);
     }
   };
 
   // ==========================================
   // 5. 폼 제출 로직 (Submit)
   // ==========================================
+
+  /**
+   * 단건 서브버전을 저장(Upsert)하는 핸들러
+   */
+  const handleSaveRow = async (index) => {
+    const row = rows[index];
+    if (!row.tag) {
+      setAlertMessage("버전(VERSION) 태그를 입력해야 저장할 수 있습니다.");
+      return;
+    }
+
+    const prefix = selectedDate.replace(/-/g, '.');
+    const targetVersionName = `${prefix}-${editVersionMode}`;
+
+    const desiredStatus = (row.status === "update") ? "UPDATED" : (row.status === "pending") ? "PENDING" : "UNCHANGED";
+
+    const payload = {
+      code: row.subVersion,
+      version: row.tag,
+      sortOrder: index,
+      submitStatus: desiredStatus, // 상태도 함께 전송
+    };
+
+    const finalNote = row.note ? row.note.trim() : "";
+    if (finalNote !== "") {
+      payload.note = finalNote;
+    }
+
+    if (row.component) {
+      payload.imageTags = row.component.split('\n').map(t => t.trim()).filter(Boolean);
+    }
+
+    setSaving(true);
+    setSubmitError("");
+    try {
+      // 단건 서브버전 저장 API 호출
+      await upsertSubVersion(targetVersionName, row.subVersion, payload);
+      
+      setAlertMessage(`${row.subVersion} 컴포넌트 정보가 저장되었습니다.`);
+      
+      // 최신 데이터를 다시 불러와서 테이블 갱신
+      const finalDetail = await getMainVersionDetail(targetVersionName);
+      setRows(buildRowsFromDetail(finalDetail, false));
+    } catch (error) {
+      const message = error.payload?.message || error.message || "서브버전 저장 중 오류가 발생했습니다.";
+      setSubmitError(message);
+      setAlertMessage(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault(); // 기본 폼 제출(페이지 새로고침) 동작 방지
 
@@ -421,35 +503,6 @@ export const DeveloperVersionRegistrationSection = ({
     const targetVersionName = modeType === "new" 
       ? `${prefix}-${maxSuffix + 1}` 
       : `${prefix}-${editVersionMode}`;
-
-    // 테이블 rows 데이터를 API 요청 페이로드 형태로 가공
-    const items = rows.map((row, index) => {
-      if (!row.tag) return null; // 버전 태그가 입력되지 않은 항목은 무시함
-
-      const payload = {
-        code: row.subVersion, // 서브버전 코드
-        version: row.tag, // 버전 태그
-        sortOrder: index, // 정렬 순서 보장
-      };
-
-      const finalNote = row.note ? row.note.trim() : ""; // 노트 앞뒤 공백 제거
-      if (finalNote !== "") {
-        payload.note = finalNote; // 최종 노트 추가
-      }
-
-      if (row.component) {
-        // 줄바꿈으로 입력된 컴포넌트 정보를 배열로 변환
-        payload.imageTags = row.component.split('\n').map(t => t.trim()).filter(Boolean);
-      }
-
-      return payload; // 가공된 페이로드 반환
-    }).filter(Boolean); // null로 반환된 무시된 항목들을 필터링하여 제거
-
-    // 유효한 서브버전 항목이 하나도 없을 경우 경고
-    if (items.length === 0) {
-      setAlertMessage("하위 컴포넌트 태그를 하나 이상 입력하세요.");
-      return;
-    }
 
     setSaving(true); // 저장 로딩 상태 시작
     setSubmitError(""); // 이전 제출 에러 초기화
@@ -476,61 +529,19 @@ export const DeveloperVersionRegistrationSection = ({
         });
       }
 
-      // 생성/수정된 버전에 하위 서브버전 항목들 일괄 저장 (Upsert)
-      await upsertSubVersions(targetVersionName, { items });
-
-      // Upsert 이후 상태값 갱신을 위해 최신 상세 데이터를 다시 불러옴
-      const detailAfterUpsert = await getMainVersionDetail(targetVersionName);
-      const byCodeAfter = {}; // 코드 이름으로 맵핑할 객체
-      (detailAfterUpsert.subVersions || []).forEach((s) => {
-        if (s?.code) byCodeAfter[s.code] = s; // 코드를 키로 하여 데이터 저장
-      });
-
-      // UI에서 선택한 상태(status: update/pending/unchanged)를 개별 API로 갱신하기 위한 프로미스 배열
-      const patchPromises = [];
-      rows.forEach((row) => {
-        if (!row.tag) return; // 무시된 항목 패스
-
-        const saved = byCodeAfter[row.subVersion]; // 서버에 저장된 해당 코드의 데이터
-        if (!saved || !saved.id) return; // 데이터가 없으면 패스
-
-        // UI의 상태 문자열을 서버에서 요구하는 열거형(Enum) 대문자로 변환
-        const desired = (row.status === "update") ? "UPDATED" : (row.status === "pending") ? "PENDING" : "UNCHANGED";
-        const existing = (saved.submitStatus || "").toUpperCase(); // 현재 서버의 상태
-        
-        // 현재 상태와 목표 상태가 다를 때만 업데이트 API 호출
-        if (existing !== desired) {
-          patchPromises.push(
-            changeSubmitStatus(saved.id, { status: desired })
-              .then(() => ({ key: row.subVersion, ok: true })) // 성공 시 결과 저장
-              .catch((err) => ({ key: row.subVersion, ok: false, error: err })) // 실패 시 에러 저장
-          );
-        }
-      });
-
-      // 생성된 상태 변경 프로미스를 병렬로 모두 실행
-      const patchResults = patchPromises.length ? await Promise.all(patchPromises) : [];
-      const failed = patchResults.filter(r => !r.ok); // 실패한 항목들 추출
-      if (failed.length) {
-        // 일부 항목의 상태 반영이 실패한 경우 경고창으로 알림
-        const codes = failed.map(f => f.key).join(", ");
-        setAlertMessage(`상태 반영 중 일부 항목이 실패했습니다: ${codes}`);
-      }
-
       // 상위 컴포넌트의 versions 목록 상태 갱신
       const exists = versions.some(v => v.versionName === targetVersionName); // 목록에 이미 존재하는지 확인
-      const newSummary = {
-        versionName: targetVersionName,
-        subVersionCount: items.length,
-        componentCount: items.length,
-        lastJob: null, // 최신 작업 내역 초기화
-      };
+      
+      if (!exists) {
+        const newSummary = {
+          versionName: targetVersionName,
+          subVersionCount: 0,
+          componentCount: 0,
+          lastJob: null, // 최신 작업 내역 초기화
+        };
+        setVersions([newSummary, ...versions]); // 없으면 맨 앞에 추가
+      }
 
-      const updatedVersions = exists
-        ? versions.map(v => (v.versionName === targetVersionName ? newSummary : v)) // 존재하면 덮어쓰기
-        : [newSummary, ...versions]; // 없으면 맨 앞에 추가
-
-      setVersions(updatedVersions); // 컨텍스트의 버전 목록 업데이트
       setSelectedVersionName(targetVersionName); // 컨텍스트의 선택된 버전 업데이트
       setRegisteredVersionName(targetVersionName); // 성공 모달에 표시될 버전명 기록
       setSubmittedModeType(modeType); // 성공 모달에 표시될 텍스트 모드 기록
@@ -540,15 +551,10 @@ export const DeveloperVersionRegistrationSection = ({
         // 신규 등록이었다면, 다음 수정을 위해 모드를 'edit'으로 변경하고 인덱스를 올림
         setModeType("edit");
         setEditVersionMode((maxSuffix + 1).toString());
-      } else {
-        // 수정 모드였다면, 성공 후 바뀐 데이터를 다시 테이블에 로드하여 동기화
-        const finalDetail = await getMainVersionDetail(targetVersionName);
-        setRows(buildRowsFromDetail(finalDetail, false));
       }
-
     } catch (error) {
       // 에러 처리: 화면 하단이나 모달로 에러 메시지 표시
-      const message = error.payload?.message || error.message || "메인버전 등록 중 오류가 발생했습니다.";
+      const message = error.payload?.message || error.message || "메인버전 등록/수정 중 오류가 발생했습니다.";
       setSubmitError(message);
       setAlertMessage(message);
     } finally {
@@ -675,23 +681,19 @@ export const DeveloperVersionRegistrationSection = ({
             </div>
           </div>
           
-          {/* 입력 폼 리셋 및 새로고침 버튼 영역 */}
-          <div className="flex justify-end pt-2 border-t border-slate-100 gap-3">
-            <button
-              type="button"
-              onClick={handleReload} // 새로고침 핸들러
-              className="py-2.5 px-8 text-base font-bold text-white bg-indigo-500 hover:bg-indigo-600 rounded-lg transition-all shadow-sm active:scale-95"
-            >
-              새로고침
-            </button>
-            <button
-              type="button"
-              onClick={handleReset} // 입력창 비우기 핸들러
-              className="py-2.5 px-8 text-base font-bold text-white bg-red-500 hover:bg-red-600 rounded-lg transition-all shadow-sm active:scale-95"
-            >
-              입력창 비우기
-            </button>
-          </div>
+          {/* 입력 폼 리셋 및 새로고침 버튼 영역 대신 신규 등록 버튼 표시 */}
+          {modeType === "new" && (
+            <div className="flex justify-end pt-2 border-t border-slate-100 gap-3">
+              <button
+                type="button"
+                onClick={handleRegisterMainVersion} // 신규 등록 핸들러
+                disabled={saving}
+                className={`py-2.5 px-8 text-base font-bold text-white bg-indigo-500 hover:bg-indigo-600 rounded-lg transition-all shadow-sm active:scale-95 ${saving ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                {saving ? "처리 중..." : "신규 등록"}
+              </button>
+            </div>
+          )}
         </section>
 
         {/* 섹션 2: SQL 및 릴리즈 노트 입력 영역 */}
@@ -830,23 +832,35 @@ export const DeveloperVersionRegistrationSection = ({
                         className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all resize-y min-h-[42px]"
                       />
                     </td>
-                    {/* 상태 열: 배포 대기(pending), 업데이트(update), 변동없음(unchanged) 선택 */}
+                    {/* 상태 열: 배포 대기(pending), 업데이트(update), 변동없음(unchanged) 선택 및 저장 버튼 */}
                     <td className="px-4 py-3 border-b border-slate-100">
-                      <div className="relative">
-                        <select
-                          value={row.status} // 현재 상태값
-                          onChange={(e) => handleRowChange(index, "status", e.target.value)}
-                          className={`w-full appearance-none rounded-md border border-slate-200 py-2.5 pl-3.5 pr-8 text-sm font-bold outline-none transition-all ${
-                            row.status === "update" ? "bg-[#0006661a] text-[#000666]" : // 파란색 강조 (update)
-                            row.status === "pending" ? "bg-[#ffdbd0] text-[#7b2e12]" : // 붉은색 강조 (pending)
-                            "bg-slate-100 text-slate-500" // 회색 (unchanged)
-                          }`}
-                        >
-                          <option value="update" className="bg-white text-[#000666] font-bold">update</option>
-                          <option value="pending" className="bg-white text-[#7b2e12] font-bold">pending</option>
-                          <option value="unchanged" className="bg-white text-slate-500 font-bold">unchanged</option>
-                        </select>
-                        <ChevronDownIcon className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                      <div className="flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <select
+                            value={row.status} // 현재 상태값
+                            onChange={(e) => handleRowChange(index, "status", e.target.value)}
+                            className={`w-full appearance-none rounded-md border border-slate-200 py-2.5 pl-3.5 pr-8 text-sm font-bold outline-none transition-all ${
+                              row.status === "update" ? "bg-[#0006661a] text-[#000666]" : // 파란색 강조 (update)
+                              row.status === "pending" ? "bg-[#ffdbd0] text-[#7b2e12]" : // 붉은색 강조 (pending)
+                              "bg-slate-100 text-slate-500" // 회색 (unchanged)
+                            }`}
+                          >
+                            <option value="update" className="bg-white text-[#000666] font-bold">update</option>
+                            <option value="pending" className="bg-white text-[#7b2e12] font-bold">pending</option>
+                            <option value="unchanged" className="bg-white text-slate-500 font-bold">unchanged</option>
+                          </select>
+                          <ChevronDownIcon className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
+                        </div>
+                        {modeType === "edit" && (
+                          <button
+                            type="button"
+                            onClick={() => handleSaveRow(index)} // 서브버전 단건 저장 핸들러
+                            disabled={saving}
+                            className="shrink-0 px-3 py-2 text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 rounded-md transition-all shadow-sm active:scale-95 disabled:opacity-50"
+                          >
+                            저장
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
