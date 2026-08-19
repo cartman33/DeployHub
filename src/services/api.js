@@ -212,16 +212,6 @@ export async function retryPackageJob(versionName, body) {
   });
 }
 
-/**
- * 특정 메인 버전에서 수정되거나 변경된 컴포넌트 목록을 분석하여 반환합니다.
- * 
- * @param {string} versionName - 분석할 메인 버전 이름
- * @returns {Promise<any>} - 변경된 컴포넌트들의 목록
- */
-export async function getChangedComponents(versionName) {
-  // GET 요청을 통해 서버에서 계산된 변경 사항 목록을 가져옵니다.
-  return request(`/main-versions/${encodeURIComponent(versionName)}/changed-components`);
-}
 
 /**
  * 기존 메인 버전의 기본 정보나 속성을 수정합니다.

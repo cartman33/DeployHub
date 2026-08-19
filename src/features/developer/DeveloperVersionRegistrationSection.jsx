@@ -69,8 +69,8 @@ export const DeveloperVersionRegistrationSection = ({
   const [registeredVersionName, setRegisteredVersionName] = useState(""); // 방금 등록/수정 완료된 버전의 이름
   
   const [saving, setSaving] = useState(false); // API 저장 중 여부를 나타내는 로딩 상태
-  const [submitError, setSubmitError] = useState(""); // 제출 과정에서 발생한 에러 메시지
-  const [loadingBase, setLoadingBase] = useState(false); // 기본 데이터(베이스라인)를 불러오는 중인지 여부
+  const [submitError, setSubmitError] = useState("");
+    const [loadingBase, setLoadingBase] = useState(false); // 기본 데이터(베이스라인)를 불러오는 중인지 여부
   const [baseStatus, setBaseStatus] = useState(""); // 기본 데이터 로딩과 관련된 상태 메시지
   const [loadError, setLoadError] = useState(""); // 데이터 로딩 중 발생한 에러 메시지
 
@@ -261,7 +261,7 @@ export const DeveloperVersionRegistrationSection = ({
         const targetName = `${prefix}-${editVersionMode}`;
         const detail = await getMainVersionDetail(targetName);
         // 수정 모드이므로 상태 유지, 노트/담당자 유지 (forcePending=false, clearNotes=false)
-        setRows(buildRowsFromDetail(detail, false, false));
+          setRows(buildRowsFromDetail(detail, false, false));
         setSqlScript(detail.mainVersion?.sqlScript || ""); // 기존 SQL 스크립트 불러오기
         setReleaseNote(detail.mainVersion?.releaseNote || ""); // 기존 릴리즈 노트 불러오기
         setBaseStatus(`버전 ${targetName} 수정 모드입니다. (오타 및 상태 수정 가능)`);
@@ -373,10 +373,37 @@ export const DeveloperVersionRegistrationSection = ({
   /**
    * 특정 행을 삭제하는 함수
    */
-  const removeRow = (index) => {
-    const newRows = [...rows]; // 배열 복사
-    newRows.splice(index, 1); // 해당 인덱스의 요소 제거
-    setRows(newRows); // 상태 업데이트
+  const removeRow = async (index) => {
+    const row = rows[index];
+    const isDefault = defaultRows.some(dr => dr.subVersion.toUpperCase() === row.subVersion.toUpperCase());
+    if (isDefault) {
+      if (window.confirm(`[${row.subVersion}] 앱은 시스템 필수 컴포넌트입니다.\n삭제 대신 입력값을 모두 초기화하시겠습니까?`)) {
+        const newRows = [...rows];
+        newRows[index] = { ...newRows[index], tag: "", note: "", status: "unchanged" };
+        setRows(newRows);
+      }
+      return;
+    }
+    if (window.confirm(`[${row.subVersion}] 커스텀 앱을 삭제하시겠습니까?\n(서버에 저장된 앱인 경우 DB에서도 즉시 삭제됩니다)`)) {
+      if (row.id && row.id.startsWith("row_extra_")) {
+        const realId = row.id.split("_")[2];
+        if (realId && !isNaN(Number(realId))) {
+          setSaving(true);
+          try {
+            await deleteSubVersion(realId);
+          } catch (err) {
+            setSaving(false);
+            const msg = err.payload?.message || err.message || "서브버전 삭제 중 오류가 발생했습니다.";
+            alert(msg);
+            return;
+          }
+          setSaving(false);
+        }
+      }
+      const newRows = [...rows];
+      newRows.splice(index, 1);
+      setRows(newRows);
+    }
   };
 
   /**
@@ -395,21 +422,7 @@ export const DeveloperVersionRegistrationSection = ({
         sqlScript: sqlScript || undefined,
       });
 
-      // 2. 가장 최신 버전의 서브버전(매니페스트)들을 템플릿으로 불러옴
-      const baselineSummary = availableVersions.length > 0 ? availableVersions[0] : versions[0];
-      let detail = null;
-      if (baselineSummary) {
-         detail = await getMainVersionDetail(baselineSummary.versionName);
-      }
-      
-      // 3. 서브버전 목록 설정 (신규 등록이므로 forcePending=true, clearNotes=true로 설정)
-      if (detail) {
-        setRows(buildRowsFromDetail(detail, true, true));
-      } else {
-        setRows([...defaultRows]);
-      }
-      
-      // 4. 컨텍스트의 버전 목록 상태 갱신
+      // 2. 컨텍스트의 버전 목록 상태 갱신
       const newSummary = {
         versionName: targetVersionName,
         subVersionCount: 0,
@@ -419,7 +432,7 @@ export const DeveloperVersionRegistrationSection = ({
       setVersions([newSummary, ...versions]);
       setSelectedVersionName(targetVersionName);
       
-      // 5. 모드를 '수정' 모드로 변경하여 매니페스트 편집 활성화
+      // 3. 모드를 '수정' 모드로 변경하여 매니페스트 편집 활성화 (loadBaseline 자동 실행)
       setModeType("edit");
       setEditVersionMode((maxSuffix + 1).toString());
       
@@ -598,16 +611,7 @@ export const DeveloperVersionRegistrationSection = ({
             <h2 className="text-2xl font-bold text-slate-800">메인버전 정보 설정</h2>
           </div>
 
-          {/* 베이스라인 로딩 상태 알림창 */}
-          <div className={`rounded-2xl border px-5 py-4 text-base font-medium ${modeType === "new" ? "border-indigo-200 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
-            {loadingBase ? (
-              <div className="font-semibold text-slate-700">{baseStatus}</div> // 로딩 중 텍스트
-            ) : loadError ? (
-              <div className="text-red-600">{loadError}</div> // 에러 텍스트
-            ) : (
-              <div>{baseStatus || "준비 중입니다."}</div> // 로딩 완료 후 상태 안내 텍스트
-            )}
-          </div>
+          
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* 날짜 선택 입력부 */}
@@ -697,6 +701,7 @@ export const DeveloperVersionRegistrationSection = ({
         </section>
 
         {/* 섹션 2: SQL 및 릴리즈 노트 입력 영역 */}
+        {modeType !== "new" && (
         <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-6">
           <div className="flex items-center gap-2 border-b pb-4 border-slate-100">
             <ListIcon className="w-5 h-5 text-[#000666]" />
@@ -728,8 +733,10 @@ export const DeveloperVersionRegistrationSection = ({
             </div>
           </div>
         </section>
+        )}
 
         {/* 섹션 3: 매니페스트 (서브버전) 상세 정보 입력 테이블 */}
+        {modeType !== "new" && (
         <section className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
           <div className="p-6 flex items-center justify-between border-b border-slate-100">
             <div className="flex items-center gap-2">
@@ -881,6 +888,7 @@ export const DeveloperVersionRegistrationSection = ({
             </button>
           </div>
         </section>
+        )}
 
         {/* 제출 에러 발생 시 경고 메시지 영역 */}
         {submitError && (
@@ -889,15 +897,7 @@ export const DeveloperVersionRegistrationSection = ({
           </div>
         )}
         
-        {/* 메인 폼 제출 버튼 */}
-        <button
-          type="submit"
-          disabled={saving} // 저장 중일 때는 버튼 비활성화
-          className={`w-full py-5 rounded-xl text-white shadow-lg text-2xl font-bold tracking-wide transition-all transform active:scale-[0.98] flex items-center justify-center gap-3 bg-[#000666] hover:bg-[#090d82] hover:shadow-indigo-200 ${saving ? "bg-slate-400 cursor-not-allowed" : ""}`}
-        >
-          <CheckCircleIcon className="w-6 h-6" />
-          <span>{saving ? "처리 중..." : (modeType === "new" ? "새로운 메인버전 등록하기" : "메인버전 수정하기")}</span>
-        </button>
+        
       </form>
 
       {/* 완료 모달: 등록 성공 후 보여지는 오버레이 화면.

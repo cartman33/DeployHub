@@ -128,6 +128,7 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
       if (!item) {
         return {
           code, // 서브버전 코드
+          key: code, // React key prop용 고유 식별자
           tag: "-", // 태그 표시 안함
           imageTags: "", // 이미지 태그 없음
           note: "-", // 노트 내용 없음
