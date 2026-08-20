@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 // UI 구성요소 및 아이콘을 임포트합니다.
 import { 
   CheckCircleIcon, 
@@ -11,9 +11,10 @@ import {
 } from "../../components/ui/Icons";
 // 백엔드 API 호출을 위한 서비스 함수들을 임포트합니다.
 import { getMainVersionDetail, getPackagingEligibility, createPackageJob, getPackageJob, retryPackageJob } from "../../services/api";
+import { AlertModal } from "../../components/ui/AlertModal";
+import { SUBVERSION_ORDER } from "../../utils/constants";
 
 // 서브버전 항목들의 기본 정렬 순서를 정의합니다.
-const SUBVERSION_ORDER = ["CC", "FOGGER", "SWG", "STDAPI", "PIIDS", "PIPS", "CIDS", "EXT", "OCR"];
 
 // [리팩토링 후보] 범용 유틸리티 함수이므로 향후 utils.js 등으로 분리하는 것을 고려할 수 있습니다.
 // 텍스트 내의 URL(http/https)을 클릭 가능한 링크(a 태그)로 변환하는 유틸리티 함수입니다.
@@ -322,6 +323,9 @@ export const DeploymentPipelineDashboardSection = ({
   
   // API 호출을 줄이기 위해 불러온 버전의 상세 정보를 임시로 저장하는 상태입니다.
   const [detailsCache, setDetailsCache] = useState({});
+  const fetchingDetailsRef = useRef(new Set());
+  const pollTimerRef = useRef(null);
+  const isMountedRef = useRef(true);
   // 패키징할 목적으로 선택된(체크된) 서브버전 아이템들을 보관하는 장바구니 상태입니다.
   const [selectedItems, setSelectedItems] = useState([]);
 
@@ -341,6 +345,11 @@ export const DeploymentPipelineDashboardSection = ({
   const [eligibilityError, setEligibilityError] = useState("");
   // 사용자에게 띄울 안내/경고 메시지입니다 (현재 경고창 컴포넌트는 사용하지 않지만 상태는 유지).
   const [alertMessage, setAlertMessage] = useState("");
+
+  useEffect(() => () => {
+    isMountedRef.current = false;
+    if (pollTimerRef.current) window.clearTimeout(pollTimerRef.current);
+  }, []);
 
   // 선택된 기준 버전에 따라 좌/우 영역에 표시할 연관 버전 목록을 계산합니다.
   const { leftSequence, rightSequence } = useMemo(() => {
@@ -418,24 +427,28 @@ export const DeploymentPipelineDashboardSection = ({
       // 좌우 시퀀스에 있는 모든 버전명을 중복 없이 추출합니다.
       const needed = [...new Set([...leftSequence, ...rightSequence])].filter(Boolean);
       // 아직 캐시에 없는 버전들만 골라냅니다.
-      const toFetch = needed.filter(v => !detailsCache[v]);
+      const toFetch = needed.filter(v => !detailsCache[v] && !fetchingDetailsRef.current.has(v));
       // 가져올 항목이 없으면 함수를 종료합니다 (무한 루프 방지).
       if (toFetch.length === 0) return;
       
       // 새 캐시 객체를 생성합니다.
-      const newCache = { ...detailsCache };
       // 필요한 각 버전에 대해 API 요청을 보냅니다.
       for (const ver of toFetch) {
+        fetchingDetailsRef.current.add(ver);
         try {
           const detail = await getMainVersionDetail(ver);
-          newCache[ver] = detail; // 성공 시 캐시에 저장합니다.
+          if (isMountedRef.current) {
+            setDetailsCache(prev => ({ ...prev, [ver]: detail }));
+          }
         } catch (e) {
           console.error(e);
-          newCache[ver] = null; // 실패 시 null로 처리합니다.
+          if (isMountedRef.current) {
+            setDetailsCache(prev => ({ ...prev, [ver]: null }));
+          }
+        } finally {
+          fetchingDetailsRef.current.delete(ver);
         }
       }
-      // 갱신된 캐시로 상태를 업데이트합니다.
-      setDetailsCache(newCache);
     };
     // 함수를 실행합니다.
     fetchDetails();
@@ -534,7 +547,7 @@ export const DeploymentPipelineDashboardSection = ({
         return;
       }
       // 아직 진행 중이라면 5초(5000ms) 뒤에 재귀적으로 다시 호출합니다.
-      setTimeout(pollJob, 5000);
+      pollTimerRef.current = window.setTimeout(pollJob, 5000);
     } catch (err) {
       // 에러가 발생한 경우 상태를 기록하고 폴링을 종료합니다.
       setJobError(err.message);
@@ -601,7 +614,7 @@ export const DeploymentPipelineDashboardSection = ({
     setPackagingStarted(true);
     try {
       // 재시도 API를 호출합니다 (이전에 넘긴 태그 정보를 서버가 알 수 있도록 재요청).
-      const res = await retryPackageJob(rightVersionName, { imageTags: [] });
+      const res = await retryPackageJob(rightVersionName, { imageTags: [], force: true });
       // 상태 업데이트 후 다시 폴링을 시작합니다.
       setJobDetail(res || null);
       setJobPolling(true);
@@ -915,7 +928,11 @@ export const DeploymentPipelineDashboardSection = ({
           </button>
         </div>
       </section>
-      
+      <AlertModal
+        isOpen={!!alertMessage}
+        message={alertMessage}
+        onClose={() => setAlertMessage("")}
+      />
     </div>
   );
 };

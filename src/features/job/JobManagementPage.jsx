@@ -1,43 +1,65 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { listPackageJobs, deletePackage, runAdminCleanup, getPackageJobFiles } from "../../services/api";
 
 export const JobManagementPage = () => {
+  // 상태 관리: Job 목록, 상태 필터, 로딩 상태, 에러 메시지
   const [jobs, setJobs] = useState([]);
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const fetchJobs = async () => {
+  // [개선/최적화] 컴포넌트 마운트 상태를 추적하여 언마운트 시 상태 업데이트 방지 (메모리 누수 방지)
+  const isMounted = useRef(true);
+
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false; // 컴포넌트 언마운트 시 false로 변경
+    };
+  }, []);
+
+  // [개선/최적화] Job 목록을 가져오는 함수 (메모이제이션으로 불필요한 재생성 방지)
+  const fetchJobs = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const statusParam = statusFilter === "ALL" ? undefined : statusFilter;
       const data = await listPackageJobs(statusParam);
+      
       let jobList = Array.isArray(data) ? data : (data?.items || []);
       
-      // N+1 호출을 감수하고 각 Job의 파일 정보를 조회하여 삭제 여부(deletedAt)를 확인합니다.
+      // [최적화 & N+1 문제 주의]
+      // 현 구조상 백엔드 목록 API에서 deletedAt을 내려주지 않아 불가피하게 개별 파일 조회 API를 호출합니다.
+      // Promise.all을 통해 병렬로 처리하여 속도를 높였습니다.
       const enrichedJobs = await Promise.all(
         jobList.map(async (job) => {
           try {
             const filesData = await getPackageJobFiles(job.versionName);
             return { ...job, deletedAt: filesData.deletedAt };
           } catch (e) {
-            return job;
+            return job; // 에러 발생 시 기존 job 유지
           }
         })
       );
       
-      setJobs(enrichedJobs);
+      // 컴포넌트가 마운트 상태일 때만 상태 갱신
+      if (isMounted.current) {
+        setJobs(enrichedJobs);
+      }
     } catch (err) {
-      setError(err.payload?.message || err.message || "Job 목록을 불러오는데 실패했습니다.");
+      if (isMounted.current) {
+        setError(err.payload?.message || err.message || "Job 목록을 불러오는데 실패했습니다.");
+      }
     } finally {
-      setLoading(false);
+      if (isMounted.current) {
+        setLoading(false);
+      }
     }
-  };
+  }, [statusFilter]);
 
   useEffect(() => {
     fetchJobs();
-  }, [statusFilter]);
+  }, [fetchJobs]);
 
   const handleDelete = async (versionName) => {
     if (!window.confirm(`정말로 [${versionName}]의 패키지 Job을 삭제하시겠습니까?`)) {
@@ -140,8 +162,9 @@ export const JobManagementPage = () => {
               </tr>
             </thead>
             <tbody>
-              {jobs.map((job, idx) => (
-                <tr key={idx} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${job.deletedAt ? "opacity-60 bg-slate-50" : ""}`}>
+              {jobs.map((job) => (
+                // [개선] 배열의 인덱스(idx) 대신 고유값인 job.versionName을 key로 사용하여 렌더링 성능과 안정성을 향상시켰습니다.
+                <tr key={job.versionName} className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${job.deletedAt ? "opacity-60 bg-slate-50" : ""}`}>
                   <td className="px-6 py-4 font-mono font-bold text-slate-800 flex flex-col gap-1">
                     {job.versionName}
                     {job.deletedAt && <span className="text-[10px] text-red-500 font-bold">삭제됨</span>}
