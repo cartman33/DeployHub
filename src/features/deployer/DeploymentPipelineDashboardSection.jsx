@@ -313,12 +313,12 @@ export const DeploymentPipelineDashboardSection = ({
   // 우측 패널의 검색어 상태를 관리합니다.
   const [rightSearch, setRightSearch] = useState("");
   
-  // 좌측 기준 버전의 기본값을 결정합니다 (두 번째 요소가 있으면 두 번째, 없으면 첫 번째).
-  const defaultLeft = versions.length > 1 ? versions[1]?.versionName : versions[0]?.versionName;
-  // 좌측 패널에 선택된 버전명을 관리하는 상태입니다.
-  const [leftVersionName, setLeftVersionName] = useState(defaultLeft || "");
+  // 배포자 모드에 진입하면 사용자가 비교할 두 버전을 직접 선택하도록 초기값을 비워둡니다.
+  const [leftVersionName, setLeftVersionName] = useState("");
   // 우측 패널(배포 대상)에 선택된 버전명을 관리하는 상태입니다.
-  const [rightVersionName, setRightVersionName] = useState(selectedVersionName || versions[0]?.versionName || "");
+  const [rightVersionName, setRightVersionName] = useState("");
+  // 왼쪽 비교 이력을 버전별로 한 페이지씩 보여주기 위한 현재 페이지입니다.
+  const [leftPage, setLeftPage] = useState(0);
   
   // API 호출을 줄이기 위해 불러온 버전의 상세 정보를 임시로 저장하는 상태입니다.
   const [detailsCache, setDetailsCache] = useState({});
@@ -344,8 +344,15 @@ export const DeploymentPipelineDashboardSection = ({
 
   // 선택된 기준 버전에 따라 좌/우 영역에 표시할 연관 버전 목록을 계산합니다.
   const { leftSequence, rightSequence } = useMemo(() => {
-    // 버전 목록이 비어있으면 빈 배열을 반환합니다.
+    // 버전 목록이 없으면 아무것도 표시하지 않습니다.
     if (!versions.length) return { leftSequence: [], rightSequence: [] };
+    // 오른쪽은 독립적으로 선택·확인할 수 있고, 왼쪽 비교는 양쪽 선택이 끝난 뒤 계산합니다.
+    if (!leftVersionName || !rightVersionName) {
+      return {
+        leftSequence: [],
+        rightSequence: rightVersionName ? [rightVersionName] : [],
+      };
+    }
     
     // 선택된 좌/우 버전의 인덱스를 찾습니다.
     const leftIdx = versions.findIndex(v => v.versionName === leftVersionName);
@@ -372,22 +379,35 @@ export const DeploymentPipelineDashboardSection = ({
     return { leftSequence: lSeq, rightSequence: rSeq };
   }, [versions, leftVersionName, rightVersionName]); // 의존성 배열에 관련 상태 포함
 
-  // 부모로부터 받은 versions가 업데이트될 때 선택된 버전들이 유효한지 검증하는 사이드 이펙트입니다.
+  // 부모로부터 받은 versions가 업데이트될 때 기존 선택값이 여전히 유효한지 검증합니다.
   useEffect(() => {
     if (versions && versions.length > 0) {
-      // 우측 버전이 목록에 없는 경우 첫 번째 버전으로 재설정합니다.
-      if (!versions.find(v => v.versionName === rightVersionName)) {
-        const newRight = versions[0].versionName;
-        setRightVersionName(newRight);
-        if (setSelectedVersionName) setSelectedVersionName(newRight);
+      // 목록에서 사라진 선택값만 비우며 최신 버전을 자동 선택하지 않습니다.
+      if (rightVersionName && !versions.find(v => v.versionName === rightVersionName)) {
+        setRightVersionName("");
+        if (setSelectedVersionName) setSelectedVersionName("");
       }
-      // 좌측 버전이 목록에 없는 경우 적절한 인덱스의 버전으로 재설정합니다.
-      if (!versions.find(v => v.versionName === leftVersionName)) {
-        const newLeft = versions.length > 1 ? versions[1].versionName : versions[0].versionName;
-        setLeftVersionName(newLeft);
+      if (leftVersionName && !versions.find(v => v.versionName === leftVersionName)) {
+        setLeftVersionName("");
       }
     }
   }, [versions, rightVersionName, leftVersionName, setSelectedVersionName]);
+
+  // 비교 범위나 배포 대상이 바뀌면 첫 페이지로 이동합니다.
+  useEffect(() => {
+    setLeftPage(0);
+  }, [leftVersionName, rightVersionName]);
+
+  useEffect(() => {
+    setLeftPage(prev => Math.min(prev, Math.max(leftSequence.length - 1, 0)));
+  }, [leftSequence.length]);
+
+  // 오른쪽 배포 대상이 바뀌면 이전 버전에서 선택한 장바구니 항목을 제거합니다.
+  useEffect(() => {
+    setSelectedItems([]);
+  }, [rightVersionName]);
+
+  const currentLeftVersion = leftSequence[leftPage] || "";
 
   // [주의] detailsCache가 의존성 배열에 포함되어 있고 내부에서 setDetailsCache를 호출하므로 주의가 필요합니다.
   // 현재는 toFetch.length === 0 조건을 통해 불필요한 호출을 방지하여 무한 루프를 피하고 있습니다.
@@ -645,27 +665,55 @@ export const DeploymentPipelineDashboardSection = ({
                 onChange={(e) => setLeftVersionName(e.target.value)}
                 className="flex-[2] min-w-[200px] appearance-none rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-8 text-base font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-shadow cursor-pointer"
               >
+                <option value="" disabled>현재 버전을 선택하세요</option>
                 {versions.map(v => (
                   <option key={v.versionName} value={v.versionName}>{v.versionName}</option>
                 ))}
               </select>
             </div>
           </div>
+
+          {/* 비교 범위에 포함된 버전을 한 페이지에 하나씩 이동합니다. */}
+          {leftSequence.length > 0 && (
+            <div className="px-4 py-2.5 border-b border-slate-200 bg-white flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setLeftPage(page => Math.max(page - 1, 0))}
+                disabled={leftPage === 0}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                이전 버전
+              </button>
+              <div className="text-center min-w-0">
+                <div className="text-sm font-extrabold text-[#000666] truncate">{currentLeftVersion}</div>
+                <div className="text-xs font-bold text-slate-500">{leftPage + 1} / {leftSequence.length}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLeftPage(page => Math.min(page + 1, leftSequence.length - 1))}
+                disabled={leftPage >= leftSequence.length - 1}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                다음 버전
+              </button>
+            </div>
+          )}
           
-          {/* 하단 버전 목록 리스트 렌더링 영역 */}
+          {/* 하단 버전 상세 렌더링 영역 */}
           <div className="flex-1 flex flex-col bg-slate-100 overflow-y-auto">
-            {leftSequence.length > 0 ? leftSequence.map(vName => (
-              // 반복해서 과거 버전 테이블을 그립니다 (읽기 전용).
+            {currentLeftVersion ? (
               <ManifestTable 
-                key={`left-${vName}`}
-                versionName={vName}
-                detail={detailsCache[vName]}
+                key={`left-${currentLeftVersion}`}
+                versionName={currentLeftVersion}
+                detail={detailsCache[currentLeftVersion]}
                 selectable={false}
               />
-            )) : (
+            ) : (
               // 표시할 버전이 없을 때의 UI
               <div className="flex items-center justify-center p-12 text-base font-bold text-slate-400">
-                선택한 범위에 해당하는 이전 버전이 없습니다.
+                {!leftVersionName || !rightVersionName
+                  ? "왼쪽과 오른쪽에서 비교할 버전을 선택해주세요."
+                  : "선택한 범위에 해당하는 이전 버전이 없습니다."}
               </div>
             )}
           </div>
@@ -697,6 +745,7 @@ export const DeploymentPipelineDashboardSection = ({
                 onChange={(e) => { setRightVersionName(e.target.value); setSelectedVersionName(e.target.value); }}
                 className="flex-[2] min-w-[200px] appearance-none rounded-lg border border-indigo-200 bg-white py-2 pl-3 pr-8 text-base font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-shadow cursor-pointer"
               >
+                <option value="" disabled>업데이트 버전을 선택하세요</option>
                 {versions.map(v => (
                   <option key={v.versionName} value={v.versionName}>{v.versionName}</option>
                 ))}
@@ -706,7 +755,7 @@ export const DeploymentPipelineDashboardSection = ({
           
           {/* 하단 버전 상세 정보 및 선택 가능한 테이블 영역 */}
           <div className="flex-1 flex flex-col bg-white overflow-y-auto">
-            {rightSequence.map(vName => (
+            {rightSequence.length > 0 ? rightSequence.map(vName => (
               // 배포 대상이 되는 최신 버전을 그립니다 (선택 가능 모드).
               <ManifestTable 
                 key={`right-${vName}`}
@@ -717,7 +766,11 @@ export const DeploymentPipelineDashboardSection = ({
                 toggleItem={toggleItem}
                 toggleAllItems={toggleAllItems}
               />
-            ))}
+            )) : (
+              <div className="flex items-center justify-center p-12 text-base font-bold text-slate-400">
+                업데이트할 버전을 선택해주세요.
+              </div>
+            )}
           </div>
         </section>
 

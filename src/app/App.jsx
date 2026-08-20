@@ -210,7 +210,6 @@ export const HtmlBody = () => {
               versions={versions}
               setVersions={setVersions}
               setSelectedVersionName={setSelectedVersionName}
-              setActiveNavigation={setActiveNavigation}
             />
           ) : (
             <JobManagementPage />

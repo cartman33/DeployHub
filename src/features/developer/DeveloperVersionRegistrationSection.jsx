@@ -1,13 +1,12 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react"; // React 훅 임포트
+import { useState, useRef, useEffect, useMemo } from "react"; // React 훅 임포트
 import { 
-  CheckCircleIcon,  // 체크 아이콘
   ListIcon, // 리스트 아이콘
   CodeIcon, // 코드 아이콘
   RocketIcon, // 로켓 아이콘 (배포 관련)
   ChevronDownIcon // 드롭다운 화살표 아이콘
 } from "../../components/ui/Icons"; // UI 아이콘 컴포넌트 임포트
 import { AlertModal } from "../../components/ui/AlertModal"; // 경고 모달 컴포넌트 임포트
-import { createMainVersion, getMainVersionDetail, upsertSubVersion, updateMainVersion } from "../../services/api"; // API 호출 함수 임포트
+import { createMainVersion, deleteSubVersion, getMainVersionDetail, upsertSubVersion } from "../../services/api"; // API 호출 함수 임포트
 
 // ==========================================
 // [Utility & Constants] 
@@ -47,8 +46,7 @@ const defaultRows = [
 export const DeveloperVersionRegistrationSection = ({ 
   versions, // 전체 버전 목록
   setVersions, // 버전 목록 업데이트 함수
-  setSelectedVersionName, // 선택된 버전명 업데이트 함수
-  setActiveNavigation // 활성화된 내비게이션 탭 설정 함수
+  setSelectedVersionName // 선택된 버전명 업데이트 함수
 }) => {
   const dateInputRef = useRef(null); // 날짜 입력 필드에 접근하기 위한 ref 생성
 
@@ -57,20 +55,16 @@ export const DeveloperVersionRegistrationSection = ({
   // ==========================================
   const [selectedDate, setSelectedDate] = useState(getTodayDateString()); // 사용자가 선택한 날짜 (기본값: 오늘)
   const [modeType, setModeType] = useState("new"); // "new" (신규 등록 모드) 또는 "edit" (수정 모드)
-  const [editVersionMode, setEditVersionMode] = useState(""); // 수정 모드일 때 선택된 버전의 접미사 (예: "-1")
-  const [submittedModeType, setSubmittedModeType] = useState("new"); // 제출 완료 시 성공 모달에서 보여줄 모드 타입
+  const [editVersionName, setEditVersionName] = useState(""); // 수정할 메인버전의 전체 이름
   
   const [rows, setRows] = useState([...defaultRows]); // 테이블에 렌더링될 서브버전 행 데이터 목록
   const [sqlScript, setSqlScript] = useState(""); // 입력된 SQL 스크립트 내용
   const [releaseNote, setReleaseNote] = useState(""); // 입력된 릴리즈 노트 내용
   const [alertMessage, setAlertMessage] = useState(""); // 화면에 띄울 경고창 메시지
 
-  const [showSuccessModal, setShowSuccessModal] = useState(false); // 성공 모달 표시 여부 플래그
-  const [registeredVersionName, setRegisteredVersionName] = useState(""); // 방금 등록/수정 완료된 버전의 이름
-  
   const [saving, setSaving] = useState(false); // API 저장 중 여부를 나타내는 로딩 상태
   const [submitError, setSubmitError] = useState("");
-    const [loadingBase, setLoadingBase] = useState(false); // 기본 데이터(베이스라인)를 불러오는 중인지 여부
+  const [loadingBase, setLoadingBase] = useState(false); // 기본 데이터(베이스라인)를 불러오는 중인지 여부
   const [baseStatus, setBaseStatus] = useState(""); // 기본 데이터 로딩과 관련된 상태 메시지
   const [loadError, setLoadError] = useState(""); // 데이터 로딩 중 발생한 에러 메시지
 
@@ -78,34 +72,42 @@ export const DeveloperVersionRegistrationSection = ({
   // 2. 파생 상태 및 데이터 가공 (Computed Data)
   // ==========================================
   
-  // 현재 선택된 날짜에 해당하는 버전 목록만 필터링하여 최신순(내림차순)으로 정렬
-  const availableVersions = useMemo(() => {
-    if (!selectedDate) return []; // 선택된 날짜가 없으면 빈 배열 반환
-    const prefix = selectedDate.replace(/-/g, '.') + '-'; // 'YYYY-MM-DD' 형식을 'YYYY.MM.DD-' 형식으로 변환
-    return versions.filter(v => v.versionName.startsWith(prefix)) // 해당 날짜 접두사로 시작하는 버전만 필터링
-      .sort((a, b) => {
-        // 하이픈(-) 뒷부분의 숫자(접미사)를 파싱하여 내림차순 정렬
-        const aSuf = parseInt(a.versionName.split('-')[1] || "1", 10);
-        const bSuf = parseInt(b.versionName.split('-')[1] || "1", 10);
-        return bSuf - aSuf; // 큰 번호가 먼저 오도록 정렬 (descending)
-      });
-  }, [selectedDate, versions]); // 선택된 날짜나 전체 버전 목록이 변경될 때만 재계산
+  const selectedVersionPrefix = selectedDate ? selectedDate.replace(/-/g, '.') : "";
 
-  // 필터링된 버전 중 가장 높은 접미사(인덱스) 계산
+  // 접미사가 없는 기본 버전은 0, '-N' 버전은 N으로 계산합니다.
+  const getVersionSuffix = (versionName) => {
+    if (!selectedVersionPrefix || versionName === selectedVersionPrefix) return 0;
+    const suffix = versionName.slice(selectedVersionPrefix.length + 1);
+    const parsed = Number.parseInt(suffix, 10);
+    return Number.isNaN(parsed) ? -1 : parsed;
+  };
+
+  // 현재 선택된 날짜의 기본 버전과 접미사 버전을 모두 최신순으로 정렬합니다.
+  const availableVersions = useMemo(() => {
+    if (!selectedVersionPrefix) return [];
+    return versions
+      .filter(v => v.versionName === selectedVersionPrefix || v.versionName.startsWith(`${selectedVersionPrefix}-`))
+      .sort((a, b) => getVersionSuffix(b.versionName) - getVersionSuffix(a.versionName));
+  }, [selectedVersionPrefix, versions]);
+
+  // 해당 날짜에 등록된 가장 높은 접미사와 다음 신규 버전명을 계산합니다.
   const maxSuffix = availableVersions.length > 0 
-    ? parseInt(availableVersions[0].versionName.split('-')[1] || "1", 10) 
-    : 0; // 해당 날짜에 등록된 버전이 없으면 0
+    ? Math.max(...availableVersions.map(v => getVersionSuffix(v.versionName)))
+    : -1;
+  const nextVersionName = availableVersions.length === 0
+    ? selectedVersionPrefix
+    : `${selectedVersionPrefix}-${maxSuffix + 1}`;
 
   // 선택된 날짜에 버전이 존재하는지에 따라 폼 모드를 자동 전환하는 사이드 이펙트
   useEffect(() => {
     if (availableVersions.length > 0) {
       // 이미 해당 날짜에 등록된 버전이 있으면 자동으로 "수정" 모드로 전환
       setModeType("edit");
-      setEditVersionMode(availableVersions[0].versionName.split('-')[1] || "1"); // 가장 최근 버전을 수정 대상으로 선택
+      setEditVersionName(availableVersions[0].versionName); // 가장 최근 버전을 수정 대상으로 선택
     } else {
       // 해당 날짜에 등록된 버전이 없으면 "신규 등록" 모드로 설정
       setModeType("new");
-      setEditVersionMode("");
+      setEditVersionName("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // 주의: availableVersions 배열 전체를 의존성으로 넣으면 얕은 비교로 인해 무한 루프가 발생할 수 있음.
@@ -236,8 +238,6 @@ export const DeveloperVersionRegistrationSection = ({
     setBaseStatus("데이터를 불러오는 중입니다..."); // 로딩 메시지 설정
     setLoadError(""); // 에러 초기화
 
-    const prefix = selectedDate.replace(/-/g, '.'); // 'YYYY.MM.DD' 형태로 변환
-
     try {
       if (modeType === "new") {
         // [신규 등록 모드] 가장 최근 버전(baseline)의 데이터를 불러와서 복사함
@@ -258,13 +258,12 @@ export const DeveloperVersionRegistrationSection = ({
         }
       } else {
         // [수정 모드] 선택된 기존 버전의 데이터를 그대로 불러옴
-        const targetName = `${prefix}-${editVersionMode}`;
-        const detail = await getMainVersionDetail(targetName);
+        const detail = await getMainVersionDetail(editVersionName);
         // 수정 모드이므로 상태 유지, 노트/담당자 유지 (forcePending=false, clearNotes=false)
           setRows(buildRowsFromDetail(detail, false, false));
         setSqlScript(detail.mainVersion?.sqlScript || ""); // 기존 SQL 스크립트 불러오기
         setReleaseNote(detail.mainVersion?.releaseNote || ""); // 기존 릴리즈 노트 불러오기
-        setBaseStatus(`버전 ${targetName} 수정 모드입니다. (오타 및 상태 수정 가능)`);
+        setBaseStatus(`버전 ${editVersionName} 수정 모드입니다. (오타 및 상태 수정 가능)`);
       }
     } catch (error) {
       // 로딩 중 에러 발생 시 기본값으로 초기화
@@ -280,12 +279,12 @@ export const DeveloperVersionRegistrationSection = ({
 
   // 모드나 날짜가 변경될 때마다 폼(baseline) 데이터를 다시 로드하는 사이드 이펙트
   useEffect(() => {
-    if (modeType === "new" || editVersionMode) {
+    if (modeType === "new" || editVersionName) {
       loadBaseline(); // 폼 세팅 함수 호출
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // 주의: versions나 loadBaseline 자체를 의존성에 포함하면 참조 변경으로 인한 무한 루프가 발생할 수 있어 생략함.
-  }, [selectedDate, modeType, editVersionMode, versions]);
+  }, [selectedDate, modeType, editVersionName, versions]);
 
   // ==========================================
   // 4. 테이블 행 드래그 앤 드롭 로직
@@ -410,8 +409,7 @@ export const DeveloperVersionRegistrationSection = ({
    * 신규 메인버전을 등록하고, 가장 최신의 매니페스트 데이터를 불러와 폼을 세팅하는 핸들러 (분리된 API 흐름)
    */
   const handleRegisterMainVersion = async () => {
-    const prefix = selectedDate.replace(/-/g, '.');
-    const targetVersionName = `${prefix}-${maxSuffix + 1}`;
+    const targetVersionName = nextVersionName;
     setSaving(true);
     setSubmitError("");
     
@@ -434,7 +432,7 @@ export const DeveloperVersionRegistrationSection = ({
       
       // 3. 모드를 '수정' 모드로 변경하여 매니페스트 편집 활성화 (loadBaseline 자동 실행)
       setModeType("edit");
-      setEditVersionMode((maxSuffix + 1).toString());
+      setEditVersionName(targetVersionName);
       
       setAlertMessage(`신규 메인버전(${targetVersionName})이 등록되었습니다. 아래에서 매니페스트 상세 정보를 작성 후 각각 저장해주세요.`);
     } catch (error) {
@@ -445,7 +443,7 @@ export const DeveloperVersionRegistrationSection = ({
       } else {
         // 이미 등록된 경우 모드만 변경
         setModeType("edit");
-        setEditVersionMode((maxSuffix + 1).toString());
+        setEditVersionName(targetVersionName);
         setAlertMessage("이미 등록된 버전입니다. 수정 모드로 전환되었습니다.");
       }
     } finally {
@@ -467,8 +465,7 @@ export const DeveloperVersionRegistrationSection = ({
       return;
     }
 
-    const prefix = selectedDate.replace(/-/g, '.');
-    const targetVersionName = `${prefix}-${editVersionMode}`;
+    const targetVersionName = editVersionName;
 
     const desiredStatus = (row.status === "update") ? "UPDATED" : (row.status === "pending") ? "PENDING" : "UNCHANGED";
 
@@ -508,81 +505,6 @@ export const DeveloperVersionRegistrationSection = ({
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault(); // 기본 폼 제출(페이지 새로고침) 동작 방지
-
-    const prefix = selectedDate.replace(/-/g, '.'); // 버전 접두어 (YYYY.MM.DD)
-    // 등록할 또는 수정할 타겟 버전 이름 생성
-    const targetVersionName = modeType === "new" 
-      ? `${prefix}-${maxSuffix + 1}` 
-      : `${prefix}-${editVersionMode}`;
-
-    setSaving(true); // 저장 로딩 상태 시작
-    setSubmitError(""); // 이전 제출 에러 초기화
-
-    try {
-      if (modeType === "new") {
-        try {
-          // 신규 버전 생성 API 호출
-          await createMainVersion(targetVersionName, {
-            releaseNote: releaseNote || undefined,
-            sqlScript: sqlScript || undefined,
-          });
-        } catch (error) {
-          // 409(Conflict) 에러는 이미 버전이 생성되었음을 의미하므로 무시하고 진행
-          if (error.status !== 409) {
-            throw error; // 다른 에러는 그대로 던짐
-          }
-        }
-      } else {
-        // 기존 버전 수정 API 호출
-        await updateMainVersion(targetVersionName, {
-          releaseNote: releaseNote || undefined,
-          sqlScript: sqlScript || undefined,
-        });
-      }
-
-      // 상위 컴포넌트의 versions 목록 상태 갱신
-      const exists = versions.some(v => v.versionName === targetVersionName); // 목록에 이미 존재하는지 확인
-      
-      if (!exists) {
-        const newSummary = {
-          versionName: targetVersionName,
-          subVersionCount: 0,
-          componentCount: 0,
-          lastJob: null, // 최신 작업 내역 초기화
-        };
-        setVersions([newSummary, ...versions]); // 없으면 맨 앞에 추가
-      }
-
-      setSelectedVersionName(targetVersionName); // 컨텍스트의 선택된 버전 업데이트
-      setRegisteredVersionName(targetVersionName); // 성공 모달에 표시될 버전명 기록
-      setSubmittedModeType(modeType); // 성공 모달에 표시될 텍스트 모드 기록
-      setShowSuccessModal(true); // 성공 모달 표시
-
-      if (modeType === "new") {
-        // 신규 등록이었다면, 다음 수정을 위해 모드를 'edit'으로 변경하고 인덱스를 올림
-        setModeType("edit");
-        setEditVersionMode((maxSuffix + 1).toString());
-      }
-    } catch (error) {
-      // 에러 처리: 화면 하단이나 모달로 에러 메시지 표시
-      const message = error.payload?.message || error.message || "메인버전 등록/수정 중 오류가 발생했습니다.";
-      setSubmitError(message);
-      setAlertMessage(message);
-    } finally {
-      setSaving(false); // 저장 로딩 상태 해제
-    }
-  };
-
-  /**
-   * 성공 모달에서 '배포 파이프라인으로 이동' 버튼 클릭 시의 동작
-   */
-  const handleGoToDeployer = () => {
-    setShowSuccessModal(false); // 성공 모달 닫기
-    setActiveNavigation("deployer"); // 전역 네비게이션을 'deployer'(배포자 탭)으로 전환
-  };
-
   // ==========================================
   // 6. UI 렌더링 (JSX)
   // ==========================================
@@ -601,8 +523,8 @@ export const DeveloperVersionRegistrationSection = ({
         </p>
       </header>
 
-      {/* 메인 폼 래퍼 */}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-8">
+      {/* 메인 입력 영역 */}
+      <div className="flex flex-col gap-8">
         
         {/* 섹션 1: 메인버전 정보 설정 */}
         <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-6">
@@ -645,8 +567,8 @@ export const DeveloperVersionRegistrationSection = ({
                     onChange={(e) => {
                       setModeType(e.target.value); // 신규 또는 수정 모드로 변경
                       // 수정 모드로 변경 시 선택된 버전이 없으면 가장 최신 버전을 기본 선택
-                      if (e.target.value === "edit" && !editVersionMode && availableVersions.length > 0) {
-                        setEditVersionMode(maxSuffix.toString());
+                      if (e.target.value === "edit" && !editVersionName && availableVersions.length > 0) {
+                        setEditVersionName(availableVersions[0].versionName);
                       }
                     }}
                     className="w-full appearance-none rounded-lg border border-slate-200 bg-slate-50 py-3.5 pl-4 pr-10 text-lg font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all cursor-pointer"
@@ -661,21 +583,20 @@ export const DeveloperVersionRegistrationSection = ({
                   {modeType === "new" ? (
                     // 신규 모드일 땐 앞으로 등록될 버전을 계산해서 보여줌 (읽기 전용 표시)
                     <div className="w-full rounded-lg border border-indigo-200 bg-indigo-50 py-3.5 px-4 text-lg font-bold text-indigo-700 text-center">
-                      등록될 버전명: {selectedDate.replace(/-/g, '.')}-{maxSuffix + 1}
+                      등록될 버전명: {nextVersionName}
                     </div>
                   ) : (
                     // 수정 모드일 땐 수정할 대상을 선택할 수 있는 드롭다운 렌더링
                     <div className="relative w-full">
                       <select
-                        value={editVersionMode} // 선택된 수정 버전 번호
-                        onChange={(e) => setEditVersionMode(e.target.value)} // 대상 변경 핸들러
+                        value={editVersionName} // 선택된 수정 버전 전체 이름
+                        onChange={(e) => setEditVersionName(e.target.value)} // 대상 변경 핸들러
                         className="w-full appearance-none rounded-lg border border-slate-200 bg-slate-50 py-3.5 pl-4 pr-10 text-lg font-medium text-slate-700 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all cursor-pointer"
                       >
                         {/* 해당 날짜의 가능한 버전들 매핑 */}
-                        {availableVersions.map(v => {
-                          const suf = v.versionName.split('-')[1] || "1"; // 접미사 추출
-                          return <option key={suf} value={suf}>{v.versionName}</option>;
-                        })}
+                        {availableVersions.map(v => (
+                          <option key={v.versionName} value={v.versionName}>{v.versionName}</option>
+                        ))}
                       </select>
                       <ChevronDownIcon className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
                     </div>
@@ -898,37 +819,7 @@ export const DeveloperVersionRegistrationSection = ({
         )}
         
         
-      </form>
-
-      {/* 완료 모달: 등록 성공 후 보여지는 오버레이 화면.
-          참고: 추후 재사용 가능한 AlertModal이나 ConfirmModal 같은 별도의 컴포넌트로 추출(Extract)하는 것이 유지보수에 좋을 수 있으나, 현재로서는 인라인으로도 무방함. */}
-      {showSuccessModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
-          <div className="bg-white rounded-2xl border border-slate-200 p-8 max-w-md w-full shadow-2xl flex flex-col items-center text-center gap-5">
-            <div className="w-16 h-16 rounded-full bg-green-50 text-green-500 flex items-center justify-center shadow-inner">
-              <CheckCircleIcon className="w-10 h-10" />
-            </div>
-            <div className="flex flex-col gap-2">
-              <h3 className="text-3xl font-bold text-slate-800">
-                {submittedModeType === "new" ? "버전 등록 완료!" : "버전 수정 완료!"}
-              </h3>
-              <p className="text-base text-slate-500 leading-relaxed px-2">
-                메인 버전 <strong className="text-[#000666] font-mono">{registeredVersionName}</strong>의 매니페스트가 성공적으로 처리되었습니다.
-              </p>
-            </div>
-            <div className="flex flex-col gap-2 w-full mt-2">
-              {/* 배포 파이프라인(디플로이어) 화면으로 넘어가는 버튼 */}
-              <button
-                type="button"
-                onClick={handleGoToDeployer}
-                className="w-full py-3 bg-[#000666] hover:bg-[#090d82] text-white font-bold rounded-xl shadow-lg hover:shadow-indigo-100 transition-all text-base"
-              >
-                배포 파이프라인(배포자)으로 이동
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* 전역적으로 사용되는 알림창 컴포넌트 */}
       <AlertModal 
