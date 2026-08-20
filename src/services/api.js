@@ -66,6 +66,7 @@ export async function listMainVersions(keyword = "", page = 0, size = 50) {
   const params = new URLSearchParams({
     page: String(page),
     size: String(size),
+    sort: 'versionName,desc',
   });
   
   // 검색 키워드가 존재하는 경우에만 쿼리 파라미터에 추가합니다.

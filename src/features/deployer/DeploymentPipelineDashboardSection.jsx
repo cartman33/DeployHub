@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 // UI 구성요소 및 아이콘을 임포트합니다.
 import { 
   CheckCircleIcon, 
@@ -9,11 +9,12 @@ import {
   ClockIcon,
   ShoppingCartIcon
 } from "../../components/ui/Icons";
+import { AlertModal } from "../../components/ui/AlertModal";
 // 백엔드 API 호출을 위한 서비스 함수들을 임포트합니다.
 import { getMainVersionDetail, getPackagingEligibility, createPackageJob, getPackageJob, retryPackageJob } from "../../services/api";
 
 // 서브버전 항목들의 기본 정렬 순서를 정의합니다.
-const SUBVERSION_ORDER = ["CC", "FOGGER", "SWG", "STDAPI", "PIIDS", "PIPS", "CIDS", "EXT", "OCR"];
+import { SUBVERSION_ORDER } from '../../utils/constants';
 
 // [리팩토링 후보] 범용 유틸리티 함수이므로 향후 utils.js 등으로 분리하는 것을 고려할 수 있습니다.
 // 텍스트 내의 URL(http/https)을 클릭 가능한 링크(a 태그)로 변환하는 유틸리티 함수입니다.
@@ -312,6 +313,8 @@ export const DeploymentPipelineDashboardSection = ({
   const [leftSearch, setLeftSearch] = useState("");
   // 우측 패널의 검색어 상태를 관리합니다.
   const [rightSearch, setRightSearch] = useState("");
+  const [leftPage, setLeftPage] = useState(1);
+  const itemsPerPage = 5;
   
   // 좌측 기준 버전의 기본값을 결정합니다 (두 번째 요소가 있으면 두 번째, 없으면 첫 번째).
   const defaultLeft = versions.length > 1 ? versions[1]?.versionName : versions[0]?.versionName;
@@ -341,6 +344,18 @@ export const DeploymentPipelineDashboardSection = ({
   const [eligibilityError, setEligibilityError] = useState("");
   // 사용자에게 띄울 안내/경고 메시지입니다 (현재 경고창 컴포넌트는 사용하지 않지만 상태는 유지).
   const [alertMessage, setAlertMessage] = useState("");
+
+  // [개선/최적화] 폴링 시 컴포넌트 언마운트로 인한 메모리 누수 방지 및 타이머 관리를 위한 Ref 추가
+  const pollTimerRef = useRef(null);
+  const isMountedRef = useRef(true);
+  
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current); // 탭 이동 등 언마운트 시 타이머 강제 종료
+    };
+  }, []);
 
   // 선택된 기준 버전에 따라 좌/우 영역에 표시할 연관 버전 목록을 계산합니다.
   const { leftSequence, rightSequence } = useMemo(() => {
@@ -389,37 +404,50 @@ export const DeploymentPipelineDashboardSection = ({
     }
   }, [versions, rightVersionName, leftVersionName, setSelectedVersionName]);
 
-  // [주의] detailsCache가 의존성 배열에 포함되어 있고 내부에서 setDetailsCache를 호출하므로 주의가 필요합니다.
-  // 현재는 toFetch.length === 0 조건을 통해 불필요한 호출을 방지하여 무한 루프를 피하고 있습니다.
-  // 선택된 버전들의 매니페스트 상세 데이터를 백엔드에서 불러와 캐시에 저장합니다.
+  // [개선/최적화] 이전 코드에서는 detailsCache 자체를 의존성에 두고 있어 무한 루프의 위험이 있었습니다.
+  // 상태 업데이트 시 함수형 업데이트(functional update)를 사용하여 의존성 배열에서 detailsCache를 제거하고 성능과 안정성을 높였습니다.
   useEffect(() => {
-    // 상세 정보를 비동기적으로 가져오는 함수입니다.
     const fetchDetails = async () => {
-      // 좌우 시퀀스에 있는 모든 버전명을 중복 없이 추출합니다.
-      const needed = [...new Set([...leftSequence, ...rightSequence])].filter(Boolean);
-      // 아직 캐시에 없는 버전들만 골라냅니다.
-      const toFetch = needed.filter(v => !detailsCache[v]);
-      // 가져올 항목이 없으면 함수를 종료합니다 (무한 루프 방지).
-      if (toFetch.length === 0) return;
+      // 좌우 시퀀스에 있는 모든 버전명을 중복 없이 추출
+      const needed = [...new Set([...leftSequence.slice((leftPage - 1) * itemsPerPage, leftPage * itemsPerPage), ...rightSequence])].filter(Boolean);
       
-      // 새 캐시 객체를 생성합니다.
-      const newCache = { ...detailsCache };
-      // 필요한 각 버전에 대해 API 요청을 보냅니다.
-      for (const ver of toFetch) {
-        try {
-          const detail = await getMainVersionDetail(ver);
-          newCache[ver] = detail; // 성공 시 캐시에 저장합니다.
-        } catch (e) {
-          console.error(e);
-          newCache[ver] = null; // 실패 시 null로 처리합니다.
+      // 캐시는 이전 상태(prevCache)를 기준으로 처리합니다.
+      setDetailsCache(prevCache => {
+        // 아직 캐시에 없는 버전만 필터링
+        const toFetch = needed.filter(v => prevCache[v] === undefined);
+        
+        // 새로 받아올 정보가 없다면 기존 캐시 그대로 반환
+        if (toFetch.length === 0) return prevCache;
+        
+        // 비동기 요청을 수행할 임시 함수 선언 (상태 업데이트 내부에서는 async/await 대기가 불가능하므로 분리)
+        const loadMissing = async () => {
+          const newEntries = {};
+          for (const ver of toFetch) {
+            try {
+              newEntries[ver] = await getMainVersionDetail(ver);
+            } catch (e) {
+              console.error(e);
+              newEntries[ver] = null;
+            }
+          }
+          // 새롭게 받아온 데이터들을 다시 상태로 합쳐줍니다.
+          setDetailsCache(current => ({ ...current, ...newEntries }));
+        };
+        
+        loadMissing(); // 비동기 로딩 시작
+        
+        // 일단 로딩이 시작되었음을 나타내기 위해 초기값을 null (또는 로딩 상태)로 셋팅해둠으로써,
+        // 다음 렌더링에 toFetch에 다시 포함되어 중복 호출되는 것을 방지합니다.
+        const pendingEntries = {};
+        for (const ver of toFetch) {
+          pendingEntries[ver] = null; 
         }
-      }
-      // 갱신된 캐시로 상태를 업데이트합니다.
-      setDetailsCache(newCache);
+        return { ...prevCache, ...pendingEntries };
+      });
     };
-    // 함수를 실행합니다.
+    
     fetchDetails();
-  }, [leftSequence, rightSequence, detailsCache]);
+  }, [leftSequence, rightSequence, leftPage]); // detailsCache 의존성 제거 완료
 
   // 우측(배포 대상) 버전이 변경될 때마다 해당 버전의 패키징 자격 및 현재 Job 상태를 확인합니다.
   useEffect(() => {
@@ -496,27 +524,36 @@ export const DeploymentPipelineDashboardSection = ({
       }));
   }, [jobDetail]); // jobDetail이 변경될 때만 재계산
 
-  // [주의] pollJob은 useCallback 내부에 있지만 rightVersionName을 참조하고 있으므로
-  // 의존성 배열에 rightVersionName이 반드시 포함되어야 하며, 폴링 중에 변경될 경우 stale closure 현상을 유의해야 합니다.
-  // 패키징 작업(Job) 상태를 서버로부터 주기적으로 가져와서 폴링(Polling)하는 함수입니다.
+  // [개선/최적화] 이전 코드의 재귀적 setTimeout 호출 시, 컴포넌트 언마운트 시 상태 변경을 시도하는 메모리 누수가 발생할 수 있었습니다.
+  // 추가된 마운트 상태(isMountedRef)를 확인하고, 진행 중인 타이머를(pollTimerRef) 해제할 수 있도록 최적화했습니다.
   const pollJob = useCallback(async () => {
+    if (!isMountedRef.current) return; // 언마운트 시 즉시 폴링 종료 (메모리 보호)
+
     try {
-      // 패키지 작업 상태 API를 호출합니다.
+      // 패키지 작업 상태 API 호출
       const j = await getPackageJob(rightVersionName);
-      // 작업 상태를 업데이트합니다.
+      
+      if (!isMountedRef.current) return; // API 응답 대기 중 화면을 이탈했을 경우를 대비한 가드
+
+      // 작업 상태 업데이트
       setJobDetail(j);
-      // 반환된 작업의 상태 코드를 가져옵니다.
       const status = j?.job?.status || j?.status || "";
-      // 완료(DONE) 또는 실패(FAILED)인 경우 폴링 루프를 중지합니다.
+      
+      // 완료(DONE) 또는 실패(FAILED)인 경우 폴링 루프 중지
       if (status === "DONE" || status === "FAILED") {
         setJobPolling(false);
         setPackagingStarted(false);
         return;
       }
-      // 아직 진행 중이라면 5초(5000ms) 뒤에 재귀적으로 다시 호출합니다.
-      setTimeout(pollJob, 5000);
+      
+      // 아직 진행 중이라면 5초 뒤 다시 폴링 (이전 타이머가 있다면 삭제 방어)
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = setTimeout(pollJob, 5000);
+      
     } catch (err) {
-      // 에러가 발생한 경우 상태를 기록하고 폴링을 종료합니다.
+      if (!isMountedRef.current) return; // 에러 캐치 직후에도 언마운트 확인
+      
+      // 에러가 발생한 경우 상태를 기록하고 폴링 종료
       setJobError(err.message);
       setJobPolling(false);
       setPackagingStarted(false);
@@ -581,7 +618,7 @@ export const DeploymentPipelineDashboardSection = ({
     setPackagingStarted(true);
     try {
       // 재시도 API를 호출합니다 (이전에 넘긴 태그 정보를 서버가 알 수 있도록 재요청).
-      const res = await retryPackageJob(rightVersionName, { imageTags: [] });
+      const res = await retryPackageJob(rightVersionName, { imageTags: [], force: true });
       // 상태 업데이트 후 다시 폴링을 시작합니다.
       setJobDetail(res || null);
       setJobPolling(true);
@@ -645,7 +682,7 @@ export const DeploymentPipelineDashboardSection = ({
                 onChange={(e) => setLeftVersionName(e.target.value)}
                 className="flex-[2] min-w-[200px] appearance-none rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-8 text-base font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-shadow cursor-pointer"
               >
-                {versions.map(v => (
+                {(versions.some(v => v.versionName === leftVersionName) ? versions : [{ versionName: leftVersionName }, ...versions]).map(v => (
                   <option key={v.versionName} value={v.versionName}>{v.versionName}</option>
                 ))}
               </select>
@@ -654,16 +691,35 @@ export const DeploymentPipelineDashboardSection = ({
           
           {/* 하단 버전 목록 리스트 렌더링 영역 */}
           <div className="flex-1 flex flex-col bg-slate-100 overflow-y-auto">
-            {leftSequence.length > 0 ? leftSequence.map(vName => (
+            {leftSequence.length > 0 ? (
+              <>
+                {leftSequence.slice((leftPage - 1) * itemsPerPage, leftPage * itemsPerPage).map(vName => (
               // 반복해서 과거 버전 테이블을 그립니다 (읽기 전용).
               <ManifestTable 
                 key={`left-${vName}`}
                 versionName={vName}
-                detail={detailsCache[vName]}
+                detail={detailsCache[vName] === "loading" ? undefined : detailsCache[vName]}
                 selectable={false}
               />
-            )) : (
-              // 표시할 버전이 없을 때의 UI
+            ))}
+                {leftSequence.length > itemsPerPage && (
+                  <div className="flex justify-center p-4 bg-white border-t border-slate-200">
+                    <div className="flex items-center gap-2">
+                      {Array.from({ length: Math.ceil(leftSequence.length / itemsPerPage) }).map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setLeftPage(i + 1)}
+                          className={`w-8 h-8 rounded flex items-center justify-center text-sm font-bold transition-colors ${leftPage === i + 1 ? 'bg-[#000666] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        >
+                          {i + 1}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+                // 표시할 버전이 없을 때의 UI
               <div className="flex items-center justify-center p-12 text-base font-bold text-slate-400">
                 선택한 범위에 해당하는 이전 버전이 없습니다.
               </div>
@@ -697,7 +753,7 @@ export const DeploymentPipelineDashboardSection = ({
                 onChange={(e) => { setRightVersionName(e.target.value); setSelectedVersionName(e.target.value); }}
                 className="flex-[2] min-w-[200px] appearance-none rounded-lg border border-indigo-200 bg-white py-2 pl-3 pr-8 text-base font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-shadow cursor-pointer"
               >
-                {versions.map(v => (
+                {(versions.some(v => v.versionName === rightVersionName) ? versions : [{ versionName: rightVersionName }, ...versions]).map(v => (
                   <option key={v.versionName} value={v.versionName}>{v.versionName}</option>
                 ))}
               </select>
@@ -711,7 +767,7 @@ export const DeploymentPipelineDashboardSection = ({
               <ManifestTable 
                 key={`right-${vName}`}
                 versionName={vName}
-                detail={detailsCache[vName]}
+                detail={detailsCache[vName] === "loading" ? undefined : detailsCache[vName]}
                 selectable={true}
                 selectedItems={selectedItems}
                 toggleItem={toggleItem}

@@ -25,18 +25,7 @@ const getTodayDateString = () => {
   return `${yyyy}-${mm}-${dd}`; // 조립된 문자열 반환
 };
 
-// 테이블에 기본적으로 표시할 서브버전(컴포넌트) 목록
-const defaultRows = [
-  { id: "cc", subVersion: "CC", component: "sb-cc-api:\nsb-cc-fe:", tag: "", note: "", status: "update", desc: "CC Component" }, // CC 컴포넌트
-  { id: "fogger", subVersion: "FOGGER", component: "fogger-sb:", tag: "", note: "", status: "unchanged", desc: "Fogger Service" }, // Fogger 서비스
-  { id: "swg", subVersion: "SWG", component: "swg-sb:", tag: "", note: "", status: "unchanged", desc: "SWG Proxy" }, // SWG 프록시
-  { id: "stdapi", subVersion: "STDAPI", component: "sb-std-api:", tag: "", note: "", status: "unchanged", desc: "Standard API" }, // 표준 API
-  { id: "piids", subVersion: "PIIDS", component: "piids-sb:", tag: "", note: "", status: "unchanged", desc: "PIIDS Detector" }, // PIIDS 탐지기
-  { id: "pips", subVersion: "PIPS", component: "pips-sb:", tag: "", note: "", status: "unchanged", desc: "PIPS Engine" }, // PIPS 엔진
-  { id: "cids", subVersion: "CIDS", component: "cids:", tag: "", note: "", status: "unchanged", desc: "CIDS Model" }, // CIDS 모델
-  { id: "ext", subVersion: "EXT", component: "ext:", tag: "", note: "", status: "unchanged", desc: "Extractor" }, // Extractor (추출기)
-  { id: "ocr", subVersion: "OCR", component: "ocr:", tag: "", note: "", status: "unchanged", desc: "OCR Engine" } // OCR 엔진
-];
+
 
 // ==========================================
 // [Main Component] 개발자 페이지 메인버전 등록/수정 컴포넌트
@@ -60,7 +49,7 @@ export const DeveloperVersionRegistrationSection = ({
   const [editVersionMode, setEditVersionMode] = useState(""); // 수정 모드일 때 선택된 버전의 접미사 (예: "-1")
   const [submittedModeType, setSubmittedModeType] = useState("new"); // 제출 완료 시 성공 모달에서 보여줄 모드 타입
   
-  const [rows, setRows] = useState([...defaultRows]); // 테이블에 렌더링될 서브버전 행 데이터 목록
+  const [rows, setRows] = useState([]); // 테이블에 렌더링될 서브버전 행 데이터 목록
   const [sqlScript, setSqlScript] = useState(""); // 입력된 SQL 스크립트 내용
   const [releaseNote, setReleaseNote] = useState(""); // 입력된 릴리즈 노트 내용
   const [alertMessage, setAlertMessage] = useState(""); // 화면에 띄울 경고창 메시지
@@ -81,8 +70,8 @@ export const DeveloperVersionRegistrationSection = ({
   // 현재 선택된 날짜에 해당하는 버전 목록만 필터링하여 최신순(내림차순)으로 정렬
   const availableVersions = useMemo(() => {
     if (!selectedDate) return []; // 선택된 날짜가 없으면 빈 배열 반환
-    const prefix = selectedDate.replace(/-/g, '.') + '-'; // 'YYYY-MM-DD' 형식을 'YYYY.MM.DD-' 형식으로 변환
-    return versions.filter(v => v.versionName.startsWith(prefix)) // 해당 날짜 접두사로 시작하는 버전만 필터링
+    const prefix = selectedDate.replace(/-/g, '.');
+      return versions.filter(v => v.versionName === prefix || v.versionName.startsWith(prefix + '-')) // 해당 날짜 접두사로 시작하는 버전만 필터링
       .sort((a, b) => {
         // 하이픈(-) 뒷부분의 숫자(접미사)를 파싱하여 내림차순 정렬
         const aSuf = parseInt(a.versionName.split('-')[1] || "1", 10);
@@ -92,16 +81,21 @@ export const DeveloperVersionRegistrationSection = ({
   }, [selectedDate, versions]); // 선택된 날짜나 전체 버전 목록이 변경될 때만 재계산
 
   // 필터링된 버전 중 가장 높은 접미사(인덱스) 계산
-  const maxSuffix = availableVersions.length > 0 
-    ? parseInt(availableVersions[0].versionName.split('-')[1] || "1", 10) 
-    : 0; // 해당 날짜에 등록된 버전이 없으면 0
+  const maxSuffix = availableVersions.length > 0
+    ? Math.max(...availableVersions.map(v => {
+        if (v.versionName === selectedDate.replace(/-/g, '.')) return 0;
+        const parts = v.versionName.split('-');
+        return parts.length > 1 ? parseInt(parts[1], 10) : 0;
+      }))
+    : -1; // 해당 날짜에 등록된 버전이 없으면 0
 
   // 선택된 날짜에 버전이 존재하는지에 따라 폼 모드를 자동 전환하는 사이드 이펙트
   useEffect(() => {
     if (availableVersions.length > 0) {
       // 이미 해당 날짜에 등록된 버전이 있으면 자동으로 "수정" 모드로 전환
       setModeType("edit");
-      setEditVersionMode(availableVersions[0].versionName.split('-')[1] || "1"); // 가장 최근 버전을 수정 대상으로 선택
+      const vName = availableVersions[0].versionName;
+      setEditVersionMode(vName.includes('-') ? vName.split('-')[1] : ""); // 가장 최근 버전을 수정 대상으로 선택
     } else {
       // 해당 날짜에 등록된 버전이 없으면 "신규 등록" 모드로 설정
       setModeType("new");
@@ -121,171 +115,71 @@ export const DeveloperVersionRegistrationSection = ({
    * CC 컴포넌트의 특수 처리(API와 FE 통합), 담당자/노트 파싱, 상태 매핑 등의 복잡한 로직을 수행함.
    */
   const buildRowsFromDetail = (detailData, forcePending, clearNotes) => {
-    // 상세 데이터나 서브버전 배열이 비어있으면 기본 행 목록을 고유한 ID와 함께 반환
-    if (!detailData || !detailData.subVersions || detailData.subVersions.length === 0) {
-      return defaultRows.map(dr => ({ ...dr, id: `row_${dr.id}_${Date.now()}` }));
-    }
-    
-    const svList = detailData.subVersions; // 서버에서 받은 서브버전 목록
-    
-    // 1. 기본 제공되는 서브버전 항목들에 데이터를 매핑
-    const newRows = defaultRows.map((dr) => {
-      let tag = ""; // 이미지 태그의 버전명
-      let component = dr.component; // 렌더링할 컴포넌트 문자열 (줄바꿈 포함)
-      let existingStatus = "UNCHANGED"; // 서버에 저장된 기존 제출 상태
-      let pureNote = ""; // 파싱된 실제 노트 텍스트
-
-      // CC 컴포넌트는 API와 FE가 하나의 항목으로 묶여야 하므로 별도 파싱 처리
-      if (dr.subVersion.toUpperCase() === "CC") {
-        const ccItem = svList.find(s => s.code.toUpperCase() === "CC"); // 단일 CC 코드 확인
-        const ccApiItem = svList.find(s => s.code.toUpperCase() === "CC API"); // CC API 코드 확인
-        const ccFeItem = svList.find(s => s.code.toUpperCase() === "CC FE"); // CC FE 코드 확인
-        
-        if (ccItem) {
-          // 단일 CC 코드로 등록된 경우의 처리
-          tag = ccItem.version || "";
-          component = ccItem.components?.length > 0 ? ccItem.components.map(c => c.imageTag).join('\n') : "sb-cc-api:\nsb-cc-fe:";
-          existingStatus = ccItem.submitStatus || "UNCHANGED";
-          pureNote = ccItem.note || "";
-        } else if (ccApiItem || ccFeItem) {
-          // CC API와 CC FE가 각각 나뉘어 있을 경우 이를 하나의 행으로 병합
-          tag = (ccApiItem?.version || ccFeItem?.version) || "";
-          const apiComp = ccApiItem?.components?.[0]?.imageTag || (ccApiItem ? `sb-cc-api:${ccApiItem.version}` : "sb-cc-api:");
-          const feComp = ccFeItem?.components?.[0]?.imageTag || (ccFeItem ? `sb-cc-fe:${ccFeItem.version}` : "sb-cc-fe:");
-          component = `${apiComp}\n${feComp}`; // 줄바꿈(\n)으로 API와 FE 컴포넌트를 합침
-          existingStatus = ccApiItem?.submitStatus || ccFeItem?.submitStatus || "UNCHANGED";
-          pureNote = ccApiItem?.note || ccFeItem?.note || "";
-        }
-      } else {
-        // 일반적인 다른 컴포넌트 처리 (예: SWG, OCR 등)
-        const item = svList.find(s => s.code.toUpperCase() === dr.subVersion.toUpperCase());
-        if (item) {
-          tag = item.version || "";
-          component = item.components?.length > 0 ? item.components.map(c => c.imageTag).join('\n') : dr.component;
-          existingStatus = item.submitStatus || "UNCHANGED";
-          pureNote = item.note || "";
-        }
-      }
-
-      // clearNotes 플래그가 true이면 노트를 초기화
-      if (clearNotes) {
-        pureNote = "";
-      }
-
-      // UI에 표시될 상태 값을 결정 (forcePending이 true면 모두 "pending"으로 초기화)
-      const statusValue = forcePending 
-        ? "pending" 
-        : (existingStatus.toLowerCase() === "updated" ? "update" : existingStatus.toLowerCase() === "pending" ? "pending" : "unchanged");
-
-      // 포맷팅이 완료된 단일 행 데이터 반환
-      return {
-        ...dr,
-        id: `row_${dr.id}_${Date.now()}`, // React 리스트 렌더링을 위한 고유 ID 부여
-        tag,
-        component,
-        note: pureNote,
-        status: statusValue
-      };
-    });
-
-    // 2. 기본 행에 포함되지 않은 사용자가 추가한 커스텀 서브버전(extraRows) 추출
-    const defaultCodes = defaultRows.map(d => d.subVersion.toUpperCase()); // 기본 행의 코드 목록
-    const extraRows = svList.filter(s => {
-      const code = s.code.toUpperCase();
-      // CC API/FE는 이미 위에서 기본 행(CC)으로 병합했으므로 커스텀 행에서 제외
-      if (code === "CC API" || code === "CC FE") return false;
-      // 기본 코드에 포함되지 않은 항목만 필터링
-      return !defaultCodes.includes(code);
-    }).map((sub, index) => {
-      const noteStr = sub.note || ""; // 노트 문자열 가져오기
-      let pureNote = noteStr; // 실제 노트 내용
-      
-      // clearNotes 플래그가 true이면 노트를 초기화
-      if (clearNotes) {
-        pureNote = "";
-      }
-
-      // 상태 매핑 로직 (위와 동일)
+    if (!detailData || !detailData.subVersions || !detailData.subVersions.length) return [];
+    return detailData.subVersions.map((sub, index) => {
+      let pureNote = sub.note || "";
+      if (clearNotes) pureNote = "";
       const existingStatus = sub.submitStatus || "UNCHANGED";
       const statusValue = forcePending 
         ? "pending" 
         : (existingStatus.toLowerCase() === "updated" ? "update" : existingStatus.toLowerCase() === "pending" ? "pending" : "unchanged");
-
-      // 커스텀 행 데이터 반환
       return {
-        id: `row_extra_${sub.id || index}_${Date.now()}`, // 고유 ID 부여
+        id: `row_${sub.code || index}_${Date.now()}`,
         subVersion: sub.code || "",
         component: sub.components?.length > 0 ? sub.components.map(c => c.imageTag).join('\n') : sub.code,
         tag: sub.version || "",
         note: pureNote,
         status: statusValue,
-        desc: "Custom Component" // 커스텀 컴포넌트임을 명시
+        desc: sub.code || "Custom Component"
       };
     });
-
-    // 기본 행과 커스텀 행을 합쳐서 전체 테이블 데이터로 반환
-    return [...newRows, ...extraRows];
   };
 
   /**
    * 모드(신규/수정) 전환 시, 이전 버전의 데이터를 바탕으로 폼(테이블, 텍스트박스 등)을 세팅하는 함수
    */
-  const loadBaseline = async () => {
-    if (!selectedDate) return; // 선택된 날짜가 없으면 종료
-    setLoadingBase(true); // 로딩 상태 활성화
-    setBaseStatus("데이터를 불러오는 중입니다..."); // 로딩 메시지 설정
-    setLoadError(""); // 에러 초기화
+  const loadBaseline = useCallback(async () => {
+    if (modeType === "edit" || editVersionMode) {
+      setLoadingBase(true);
+      setBaseStatus("버전 정보 로딩 중...");
+      setLoadError("");
+      try {
+        const prefix = selectedDate.replace(/-/g, '.');
+        const targetVersionName = editVersionMode ? `${prefix}-${editVersionMode}` : prefix; 
 
-    const prefix = selectedDate.replace(/-/g, '.'); // 'YYYY.MM.DD' 형태로 변환
-
-    try {
-      if (modeType === "new") {
-        // [신규 등록 모드] 가장 최근 버전(baseline)의 데이터를 불러와서 복사함
-        const baselineSummary = availableVersions.length > 0 ? availableVersions[0] : versions[0];
-        if (baselineSummary) {
-          const detail = await getMainVersionDetail(baselineSummary.versionName); // 상세 데이터 조회
-          // 신규 등록이므로 상태를 모두 pending으로 강제 변경(forcePending=true), 노트/담당자 초기화(clearNotes=true)
+        const detail = await getMainVersionDetail(targetVersionName);
+        
+        if (modeType === "new") {
           setRows(buildRowsFromDetail(detail, true, true));
-          setSqlScript(""); // SQL 스크립트 초기화
-          setReleaseNote(""); // 릴리즈 노트 초기화
-          setBaseStatus(`최신 버전(${baselineSummary.versionName})을 기준으로 신규 등록을 준비합니다. (모든 상태가 pending으로 리셋됩니다)`);
+          setSqlScript(""); 
+          setReleaseNote(""); 
+          setBaseStatus(`이전 버전(${targetVersionName})을 기반으로 새 버전을 작성합니다.`);
         } else {
-          // 복사할 이전 버전이 아예 없는 경우 빈 기본 행으로 시작
-          setRows([...defaultRows]);
-          setSqlScript("");
-          setReleaseNote("");
-          setBaseStatus("새로운 메인버전 등록을 준비합니다.");
-        }
-      } else {
-        // [수정 모드] 선택된 기존 버전의 데이터를 그대로 불러옴
-        const targetName = `${prefix}-${editVersionMode}`;
-        const detail = await getMainVersionDetail(targetName);
-        // 수정 모드이므로 상태 유지, 노트/담당자 유지 (forcePending=false, clearNotes=false)
           setRows(buildRowsFromDetail(detail, false, false));
-        setSqlScript(detail.mainVersion?.sqlScript || ""); // 기존 SQL 스크립트 불러오기
-        setReleaseNote(detail.mainVersion?.releaseNote || ""); // 기존 릴리즈 노트 불러오기
-        setBaseStatus(`버전 ${targetName} 수정 모드입니다. (오타 및 상태 수정 가능)`);
+          setSqlScript(detail.mainVersion?.sqlScript || ""); 
+          setReleaseNote(detail.mainVersion?.releaseNote || ""); 
+          setBaseStatus(`버전 ${targetVersionName} 수정 모드입니다. (오타 및 상태 수정 가능)`);
+        }
+      } catch (error) {
+        setRows([]);
+        setSqlScript("");
+        setReleaseNote("");
+        setLoadError(error.payload?.message || error.message || "데이터를 불러오는 중 오류가 발생했습니다.");
+        setBaseStatus("");
+      } finally {
+        setLoadingBase(false);
       }
-    } catch (error) {
-      // 로딩 중 에러 발생 시 기본값으로 초기화
-      setRows([...defaultRows]);
-      setSqlScript("");
-      setReleaseNote("");
-      setLoadError(error.payload?.message || error.message || "데이터를 불러오는 중 오류가 발생했습니다."); // 에러 메시지 표시
-      setBaseStatus("");
-    } finally {
-      setLoadingBase(false); // 로딩 상태 해제
     }
-  };
+  }, [selectedDate, modeType, editVersionMode]);
 
-  // 모드나 날짜가 변경될 때마다 폼(baseline) 데이터를 다시 로드하는 사이드 이펙트
   useEffect(() => {
-    if (modeType === "new" || editVersionMode) {
-      loadBaseline(); // 폼 세팅 함수 호출
+    // skip intermediate state
+    if (versions.length === 0) return;
+    if (modeType === "new" && availableVersions.length > 0) return;
+    if (modeType === "new" || editVersionMode !== null) {
+      loadBaseline(); 
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    // 주의: versions나 loadBaseline 자체를 의존성에 포함하면 참조 변경으로 인한 무한 루프가 발생할 수 있어 생략함.
-  }, [selectedDate, modeType, editVersionMode, versions]);
+  }, [modeType, editVersionMode, availableVersions.length, versions.length, loadBaseline]);
 
   // ==========================================
   // 4. 테이블 행 드래그 앤 드롭 로직
@@ -375,16 +269,7 @@ export const DeveloperVersionRegistrationSection = ({
    */
   const removeRow = async (index) => {
     const row = rows[index];
-    const isDefault = defaultRows.some(dr => dr.subVersion.toUpperCase() === row.subVersion.toUpperCase());
-    if (isDefault) {
-      if (window.confirm(`[${row.subVersion}] 앱은 시스템 필수 컴포넌트입니다.\n삭제 대신 입력값을 모두 초기화하시겠습니까?`)) {
-        const newRows = [...rows];
-        newRows[index] = { ...newRows[index], tag: "", note: "", status: "unchanged" };
-        setRows(newRows);
-      }
-      return;
-    }
-    if (window.confirm(`[${row.subVersion}] 커스텀 앱을 삭제하시겠습니까?\n(서버에 저장된 앱인 경우 DB에서도 즉시 삭제됩니다)`)) {
+    if (window.confirm(`[${row.subVersion}] 컴포넌트를 삭제하시겠습니까?\n(서버에 저장된 경우 DB에서도 삭제됩니다.)`)) {
       if (row.id && row.id.startsWith("row_extra_")) {
         const realId = row.id.split("_")[2];
         if (realId && !isNaN(Number(realId))) {
@@ -411,7 +296,7 @@ export const DeveloperVersionRegistrationSection = ({
    */
   const handleRegisterMainVersion = async () => {
     const prefix = selectedDate.replace(/-/g, '.');
-    const targetVersionName = `${prefix}-${maxSuffix + 1}`;
+    const targetVersionName = maxSuffix >= 0 ? `${prefix}-${maxSuffix + 1}` : prefix;
     setSaving(true);
     setSubmitError("");
     
@@ -434,7 +319,7 @@ export const DeveloperVersionRegistrationSection = ({
       
       // 3. 모드를 '수정' 모드로 변경하여 매니페스트 편집 활성화 (loadBaseline 자동 실행)
       setModeType("edit");
-      setEditVersionMode((maxSuffix + 1).toString());
+      setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
       
       setAlertMessage(`신규 메인버전(${targetVersionName})이 등록되었습니다. 아래에서 매니페스트 상세 정보를 작성 후 각각 저장해주세요.`);
     } catch (error) {
@@ -445,7 +330,7 @@ export const DeveloperVersionRegistrationSection = ({
       } else {
         // 이미 등록된 경우 모드만 변경
         setModeType("edit");
-        setEditVersionMode((maxSuffix + 1).toString());
+        setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
         setAlertMessage("이미 등록된 버전입니다. 수정 모드로 전환되었습니다.");
       }
     } finally {
@@ -468,7 +353,7 @@ export const DeveloperVersionRegistrationSection = ({
     }
 
     const prefix = selectedDate.replace(/-/g, '.');
-    const targetVersionName = `${prefix}-${editVersionMode}`;
+    const targetVersionName = (editVersionMode ? `${prefix}-${editVersionMode}` : prefix);
 
     const desiredStatus = (row.status === "update") ? "UPDATED" : (row.status === "pending") ? "PENDING" : "UNCHANGED";
 
@@ -514,8 +399,8 @@ export const DeveloperVersionRegistrationSection = ({
     const prefix = selectedDate.replace(/-/g, '.'); // 버전 접두어 (YYYY.MM.DD)
     // 등록할 또는 수정할 타겟 버전 이름 생성
     const targetVersionName = modeType === "new" 
-      ? `${prefix}-${maxSuffix + 1}` 
-      : `${prefix}-${editVersionMode}`;
+        ? (maxSuffix >= 0 ? `${prefix}-${maxSuffix + 1}` : prefix) 
+        : (editVersionMode ? `${prefix}-${editVersionMode}` : prefix);
 
     setSaving(true); // 저장 로딩 상태 시작
     setSubmitError(""); // 이전 제출 에러 초기화
@@ -563,7 +448,7 @@ export const DeveloperVersionRegistrationSection = ({
       if (modeType === "new") {
         // 신규 등록이었다면, 다음 수정을 위해 모드를 'edit'으로 변경하고 인덱스를 올림
         setModeType("edit");
-        setEditVersionMode((maxSuffix + 1).toString());
+        setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
       }
     } catch (error) {
       // 에러 처리: 화면 하단이나 모달로 에러 메시지 표시
@@ -646,7 +531,7 @@ export const DeveloperVersionRegistrationSection = ({
                       setModeType(e.target.value); // 신규 또는 수정 모드로 변경
                       // 수정 모드로 변경 시 선택된 버전이 없으면 가장 최신 버전을 기본 선택
                       if (e.target.value === "edit" && !editVersionMode && availableVersions.length > 0) {
-                        setEditVersionMode(maxSuffix.toString());
+                        setEditVersionMode(maxSuffix > 0 ? maxSuffix.toString() : '');
                       }
                     }}
                     className="w-full appearance-none rounded-lg border border-slate-200 bg-slate-50 py-3.5 pl-4 pr-10 text-lg font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all cursor-pointer"
@@ -661,7 +546,7 @@ export const DeveloperVersionRegistrationSection = ({
                   {modeType === "new" ? (
                     // 신규 모드일 땐 앞으로 등록될 버전을 계산해서 보여줌 (읽기 전용 표시)
                     <div className="w-full rounded-lg border border-indigo-200 bg-indigo-50 py-3.5 px-4 text-lg font-bold text-indigo-700 text-center">
-                      등록될 버전명: {selectedDate.replace(/-/g, '.')}-{maxSuffix + 1}
+                      등록될 버전명: {selectedDate.replace(/-/g, '.')}{maxSuffix >= 0 ? `-${maxSuffix + 1}` : ''}
                     </div>
                   ) : (
                     // 수정 모드일 땐 수정할 대상을 선택할 수 있는 드롭다운 렌더링
@@ -673,9 +558,9 @@ export const DeveloperVersionRegistrationSection = ({
                       >
                         {/* 해당 날짜의 가능한 버전들 매핑 */}
                         {availableVersions.map(v => {
-                          const suf = v.versionName.split('-')[1] || "1"; // 접미사 추출
-                          return <option key={suf} value={suf}>{v.versionName}</option>;
-                        })}
+                            const suf = v.versionName.includes('-') ? v.versionName.split('-')[1] : '';
+                            return <option key={suf || 'default'} value={suf}>{v.versionName}</option>;
+                          })}
                       </select>
                       <ChevronDownIcon className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
                     </div>
@@ -818,7 +703,7 @@ export const DeveloperVersionRegistrationSection = ({
                         required
                         value={row.component} // 컴포넌트 정보 및 이미지 태그들
                         onChange={(e) => handleRowChange(index, "component", e.target.value)}
-                        placeholder="예: sb-cc-api:v2.0.27"
+                        placeholder="예: myapp-api:v2.0.27"
                         rows={2} // 멀티라인 지원 (CC의 경우 API/FE 두 줄)
                         className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all font-mono resize-y min-h-[42px]"
                       />

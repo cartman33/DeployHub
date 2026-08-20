@@ -27,6 +27,9 @@ export const HtmlBody = () => {
   const [selectedVersionName, setSelectedVersionName] = useState("");
   // 버전 목록 로딩 상태를 관리합니다.
   const [loadingVersions, setLoadingVersions] = useState(true);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [currentKeyword, setCurrentKeyword] = useState("");
   // 버전 목록 로드 중 발생한 에러 메시지를 관리합니다.
   const [versionError, setVersionError] = useState("");
 
@@ -42,16 +45,7 @@ export const HtmlBody = () => {
       const response = await listMainVersions(searchStr, 0, 50);
       const items = response?.items || [];
       // 버전 이름을 기준으로 최신순 정렬을 수행합니다.
-      items.sort((a, b) => {
-        const [aDate, aSuf] = a.versionName.split('-');
-        const [bDate, bSuf] = b.versionName.split('-');
-        if (aDate !== bDate) {
-          return bDate.localeCompare(aDate);
-        }
-        const aNum = parseInt(aSuf || "1", 10);
-        const bNum = parseInt(bSuf || "1", 10);
-        return bNum - aNum;
-      });
+      // Server handles sorting.
       setVersions(items);
       // 선택된 버전이 없고 목록이 존재하면 첫 번째 버전을 기본값으로 설정합니다.
       if (!selectedVersionName && items.length > 0) {
@@ -76,7 +70,7 @@ export const HtmlBody = () => {
     let mounted = true;
 
     // 초기 버전 목록을 불러옵니다.
-    loadVersions();
+    loadVersions('', 0, false);
     
     // NCR 헬스 체크를 수행하고 상태를 업데이트합니다.
     registryHealth()
@@ -204,6 +198,8 @@ export const HtmlBody = () => {
               selectedVersionName={selectedVersionName}
               setSelectedVersionName={setSelectedVersionName}
               reloadVersions={loadVersions}
+              page={page}
+              hasMore={hasMore}
             />
           ) : activeNavigation === "developer" ? (
             <DeveloperVersionRegistrationSection 
