@@ -27,6 +27,7 @@ export const HtmlBody = () => {
   const [selectedVersionName, setSelectedVersionName] = useState("");
   // 버전 목록 로딩 상태를 관리합니다.
   const [loadingVersions, setLoadingVersions] = useState(true);
+  // [추가됨] 메인버전 목록 페이징을 위한 상태 (현재 페이지 번호)
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [currentKeyword, setCurrentKeyword] = useState("");

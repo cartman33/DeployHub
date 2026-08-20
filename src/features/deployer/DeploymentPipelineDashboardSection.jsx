@@ -313,7 +313,8 @@ export const DeploymentPipelineDashboardSection = ({
   const [leftSearch, setLeftSearch] = useState("");
   // 우측 패널의 검색어 상태를 관리합니다.
   const [rightSearch, setRightSearch] = useState("");
-  const [leftPage, setLeftPage] = useState(1);
+  // [추가됨] 배포자 페이지 좌측 컴포넌트 목록 페이징 처리 상태
+  const [leftVisibleCount, setLeftVisibleCount] = useState(5);
   const itemsPerPage = 5;
   
   // 좌측 기준 버전의 기본값을 결정합니다 (두 번째 요소가 있으면 두 번째, 없으면 첫 번째).
@@ -325,7 +326,11 @@ export const DeploymentPipelineDashboardSection = ({
   
   // API 호출을 줄이기 위해 불러온 버전의 상세 정보를 임시로 저장하는 상태입니다.
   const [detailsCache, setDetailsCache] = useState({});
-  // 패키징할 목적으로 선택된(체크된) 서브버전 아이템들을 보관하는 장바구니 상태입니다.
+    const fetchingRef = useRef(new Set());
+    // [추가됨] 페이지 이동 시 스크롤을 상단으로 리셋하기 위한 Ref
+    const leftScrollRef = useRef(null);
+    
+    // 패키징할 목적으로 선택된(체크된) 서브버전 아이템들을 보관하는 장바구니 상태입니다.
   const [selectedItems, setSelectedItems] = useState([]);
 
   // 패키징 작업이 시작되었는지를 나타내는 상태입니다.
@@ -387,6 +392,26 @@ export const DeploymentPipelineDashboardSection = ({
     return { leftSequence: lSeq, rightSequence: rSeq };
   }, [versions, leftVersionName, rightVersionName]); // 의존성 배열에 관련 상태 포함
 
+      useEffect(() => {
+        setLeftVisibleCount(5);
+        if (leftScrollRef.current) {
+          leftScrollRef.current.scrollTop = 0;
+        }
+      }, [leftSequence]);
+      
+      let scrollTimeout = null;
+    const handleLeftScroll = (e) => {
+      const { scrollTop, clientHeight, scrollHeight } = e.target;
+      if (scrollHeight - scrollTop <= clientHeight + 100) {
+        if (!scrollTimeout) {
+          scrollTimeout = setTimeout(() => {
+            setLeftVisibleCount(prev => (prev < leftSequence.length ? prev + 5 : prev));
+            scrollTimeout = null;
+          }, 150);
+        }
+      }
+    };
+
   // 부모로부터 받은 versions가 업데이트될 때 선택된 버전들이 유효한지 검증하는 사이드 이펙트입니다.
   useEffect(() => {
     if (versions && versions.length > 0) {
@@ -406,48 +431,34 @@ export const DeploymentPipelineDashboardSection = ({
 
   // [개선/최적화] 이전 코드에서는 detailsCache 자체를 의존성에 두고 있어 무한 루프의 위험이 있었습니다.
   // 상태 업데이트 시 함수형 업데이트(functional update)를 사용하여 의존성 배열에서 detailsCache를 제거하고 성능과 안정성을 높였습니다.
-  useEffect(() => {
+      useEffect(() => {
     const fetchDetails = async () => {
-      // 좌우 시퀀스에 있는 모든 버전명을 중복 없이 추출
-      const needed = [...new Set([...leftSequence.slice((leftPage - 1) * itemsPerPage, leftPage * itemsPerPage), ...rightSequence])].filter(Boolean);
+      const needed = [...new Set([...leftSequence.slice(0, leftVisibleCount), ...rightSequence])].filter(Boolean);
       
-      // 캐시는 이전 상태(prevCache)를 기준으로 처리합니다.
-      setDetailsCache(prevCache => {
-        // 아직 캐시에 없는 버전만 필터링
-        const toFetch = needed.filter(v => prevCache[v] === undefined);
-        
-        // 새로 받아올 정보가 없다면 기존 캐시 그대로 반환
-        if (toFetch.length === 0) return prevCache;
-        
-        // 비동기 요청을 수행할 임시 함수 선언 (상태 업데이트 내부에서는 async/await 대기가 불가능하므로 분리)
-        const loadMissing = async () => {
-          const newEntries = {};
-          for (const ver of toFetch) {
-            try {
-              newEntries[ver] = await getMainVersionDetail(ver);
-            } catch (e) {
-              console.error(e);
-              newEntries[ver] = null;
-            }
-          }
-          // 새롭게 받아온 데이터들을 다시 상태로 합쳐줍니다.
-          setDetailsCache(current => ({ ...current, ...newEntries }));
-        };
-        
-        loadMissing(); // 비동기 로딩 시작
-        
-        // 일단 로딩이 시작되었음을 나타내기 위해 초기값을 null (또는 로딩 상태)로 셋팅해둠으로써,
-        // 다음 렌더링에 toFetch에 다시 포함되어 중복 호출되는 것을 방지합니다.
-        const pendingEntries = {};
-        for (const ver of toFetch) {
-          pendingEntries[ver] = null; 
-        }
-        return { ...prevCache, ...pendingEntries };
+      const toFetch = needed.filter(v => detailsCache[v] === undefined && !fetchingRef.current.has(v));
+      if (toFetch.length === 0) return;
+
+      toFetch.forEach(v => fetchingRef.current.add(v));
+
+      setDetailsCache(prev => {
+        let next = { ...prev };
+        toFetch.forEach(v => { next[v] = "loading"; });
+        return next;
       });
+
+      for (const ver of toFetch) {
+        try {
+          const detail = await getMainVersionDetail(ver);
+          setDetailsCache(curr => ({ ...curr, [ver]: detail }));
+        } catch (e) {
+          setDetailsCache(curr => ({ ...curr, [ver]: null }));
+        } finally {
+          fetchingRef.current.delete(ver);
+        }
+      }
     };
-    
     fetchDetails();
-  }, [leftSequence, rightSequence, leftPage]); // detailsCache 의존성 제거 완료
+  }, [leftSequence, rightSequence, leftVisibleCount]); // detailsCache 의존성 제거 완료
 
   // 우측(배포 대상) 버전이 변경될 때마다 해당 버전의 패키징 자격 및 현재 Job 상태를 확인합니다.
   useEffect(() => {
@@ -690,10 +701,10 @@ export const DeploymentPipelineDashboardSection = ({
           </div>
           
           {/* 하단 버전 목록 리스트 렌더링 영역 */}
-          <div className="flex-1 flex flex-col bg-slate-100 overflow-y-auto">
+          <div ref={leftScrollRef} onScroll={handleLeftScroll} className="flex-1 flex flex-col bg-slate-100 overflow-y-auto">
             {leftSequence.length > 0 ? (
               <>
-                {leftSequence.slice((leftPage - 1) * itemsPerPage, leftPage * itemsPerPage).map(vName => (
+                {leftSequence.slice(0, leftVisibleCount).map(vName => (
               // 반복해서 과거 버전 테이블을 그립니다 (읽기 전용).
               <ManifestTable 
                 key={`left-${vName}`}
@@ -702,21 +713,7 @@ export const DeploymentPipelineDashboardSection = ({
                 selectable={false}
               />
             ))}
-                {leftSequence.length > itemsPerPage && (
-                  <div className="flex justify-center p-4 bg-white border-t border-slate-200">
-                    <div className="flex items-center gap-2">
-                      {Array.from({ length: Math.ceil(leftSequence.length / itemsPerPage) }).map((_, i) => (
-                        <button
-                          key={i}
-                          onClick={() => setLeftPage(i + 1)}
-                          className={`w-8 h-8 rounded flex items-center justify-center text-sm font-bold transition-colors ${leftPage === i + 1 ? 'bg-[#000666] text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
-                        >
-                          {i + 1}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+                
               </>
             ) : (
                 // 표시할 버전이 없을 때의 UI

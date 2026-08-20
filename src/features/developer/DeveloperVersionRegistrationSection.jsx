@@ -52,7 +52,8 @@ export const DeveloperVersionRegistrationSection = ({
   const [rows, setRows] = useState([]); // 테이블에 렌더링될 서브버전 행 데이터 목록
   const [sqlScript, setSqlScript] = useState(""); // 입력된 SQL 스크립트 내용
   const [releaseNote, setReleaseNote] = useState(""); // 입력된 릴리즈 노트 내용
-  const [alertMessage, setAlertMessage] = useState(""); // 화면에 띄울 경고창 메시지
+  const [alertMessage, setAlertMessage] = useState("");
+    const [alertType, setAlertType] = useState("warning"); // 화면에 띄울 경고창 메시지
 
   const [showSuccessModal, setShowSuccessModal] = useState(false); // 성공 모달 표시 여부 플래그
   const [registeredVersionName, setRegisteredVersionName] = useState(""); // 방금 등록/수정 완료된 버전의 이름
@@ -81,6 +82,8 @@ export const DeveloperVersionRegistrationSection = ({
   }, [selectedDate, versions]); // 선택된 날짜나 전체 버전 목록이 변경될 때만 재계산
 
   // 필터링된 버전 중 가장 높은 접미사(인덱스) 계산
+  // [수정됨] 해당 날짜에 배포된 버전들 중 가장 높은 인덱스 번호를 계산
+  // "2026.08.04" 오리지널 버전이 존재하면 0, "2026.08.04-1"이 존재하면 1 반환. 아예 없으면 -1 반환
   const maxSuffix = availableVersions.length > 0
     ? Math.max(...availableVersions.map(v => {
         if (v.versionName === selectedDate.replace(/-/g, '.')) return 0;
@@ -145,6 +148,7 @@ export const DeveloperVersionRegistrationSection = ({
       setLoadError("");
       try {
         const prefix = selectedDate.replace(/-/g, '.');
+        // [수정됨] editVersionMode가 "" 이면 오리지널 버전(ex: 2026.08.04)을 타겟으로 API 조회 (404 버그 해결)
         const targetVersionName = editVersionMode ? `${prefix}-${editVersionMode}` : prefix; 
 
         const detail = await getMainVersionDetail(targetVersionName);
@@ -176,7 +180,8 @@ export const DeveloperVersionRegistrationSection = ({
     // skip intermediate state
     if (versions.length === 0) return;
     if (modeType === "new" && availableVersions.length > 0) return;
-    if (modeType === "new" || editVersionMode !== null) {
+    // [수정됨] editVersionMode가 빈 문자열("")일 때(즉, 오리지널 버전 선택시) falsy 취급되어 API 호출이 스킵되는 버그 수정
+      if (modeType === "new" || editVersionMode !== null) {
       loadBaseline(); 
     }
   }, [modeType, editVersionMode, availableVersions.length, versions.length, loadBaseline]);
@@ -321,17 +326,17 @@ export const DeveloperVersionRegistrationSection = ({
       setModeType("edit");
       setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
       
-      setAlertMessage(`신규 메인버전(${targetVersionName})이 등록되었습니다. 아래에서 매니페스트 상세 정보를 작성 후 각각 저장해주세요.`);
+      setAlertType("success"); setAlertMessage(`신규 메인버전(${targetVersionName})이 등록되었습니다. 아래에서 매니페스트 상세 정보를 작성 후 각각 저장해주세요.`);
     } catch (error) {
       if (error.status !== 409) {
         const message = error.payload?.message || error.message || "메인버전 등록 중 오류가 발생했습니다.";
         setSubmitError(message);
-        setAlertMessage(message);
+        setAlertType("warning"); setAlertMessage(message);
       } else {
         // 이미 등록된 경우 모드만 변경
         setModeType("edit");
         setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
-        setAlertMessage("이미 등록된 버전입니다. 수정 모드로 전환되었습니다.");
+        setAlertType("warning"); setAlertMessage("이미 등록된 버전입니다. 수정 모드로 전환되었습니다.");
       }
     } finally {
       setSaving(false);
@@ -348,7 +353,7 @@ export const DeveloperVersionRegistrationSection = ({
   const handleSaveRow = async (index) => {
     const row = rows[index];
     if (!row.tag) {
-      setAlertMessage("버전(VERSION) 태그를 입력해야 저장할 수 있습니다.");
+      setAlertType("warning"); setAlertMessage("버전(VERSION) 태그를 입력해야 저장할 수 있습니다.");
       return;
     }
 
@@ -379,7 +384,7 @@ export const DeveloperVersionRegistrationSection = ({
       // 단건 서브버전 저장 API 호출
       await upsertSubVersion(targetVersionName, row.subVersion, payload);
       
-      setAlertMessage(`${row.subVersion} 컴포넌트 정보가 저장되었습니다.`);
+      setAlertType("warning"); setAlertMessage(`${row.subVersion} 컴포넌트 정보가 저장되었습니다.`);
       
       // 최신 데이터를 다시 불러와서 테이블 갱신
       const finalDetail = await getMainVersionDetail(targetVersionName);
@@ -387,7 +392,7 @@ export const DeveloperVersionRegistrationSection = ({
     } catch (error) {
       const message = error.payload?.message || error.message || "서브버전 저장 중 오류가 발생했습니다.";
       setSubmitError(message);
-      setAlertMessage(message);
+      setAlertType("warning"); setAlertMessage(message);
     } finally {
       setSaving(false);
     }
@@ -454,7 +459,7 @@ export const DeveloperVersionRegistrationSection = ({
       // 에러 처리: 화면 하단이나 모달로 에러 메시지 표시
       const message = error.payload?.message || error.message || "메인버전 등록/수정 중 오류가 발생했습니다.";
       setSubmitError(message);
-      setAlertMessage(message);
+      setAlertType("warning"); setAlertMessage(message);
     } finally {
       setSaving(false); // 저장 로딩 상태 해제
     }
@@ -817,10 +822,11 @@ export const DeveloperVersionRegistrationSection = ({
 
       {/* 전역적으로 사용되는 알림창 컴포넌트 */}
       <AlertModal 
-        isOpen={!!alertMessage} 
-        message={alertMessage} 
-        onClose={() => setAlertMessage("")} 
-      />
+          isOpen={!!alertMessage} 
+          message={alertMessage} 
+          type={alertType} 
+          onClose={() => setAlertMessage("")} 
+        />
     </div>
   );
 };
