@@ -282,6 +282,7 @@ const compareVersionNames = (leftName, rightName) => {
   return 0;
 };
 
+// API 오류 상세는 엔드포인트에 따라 문자열·배열·객체로 올 수 있어 사용자 표시용 문자열로 정규화합니다.
 const formatErrorDetail = (detail) => {
   if (detail == null || detail === "") return "";
   if (Array.isArray(detail)) {
@@ -300,6 +301,7 @@ const formatErrorDetail = (detail) => {
   return String(detail);
 };
 
+// 패키징 API의 실제 계약은 details(복수)를 사용하며, 기존/다른 오류 응답의 detail(단수)도 호환합니다.
 const getErrorDetail = (error) => error?.payload?.details ?? error?.payload?.detail;
 
 const getJobErrorData = (error, fallback) => {
@@ -308,6 +310,7 @@ const getJobErrorData = (error, fallback) => {
   return { message, detail };
 };
 
+// 레지스트리에서 찾지 못한 IMAGE TAG를 장바구니 행과 역매칭해 사용자가 수정할 APP을 함께 보여줍니다.
 const getRegistryErrorItems = (detail, selectedItems) => {
   const imageTags = Array.isArray(detail)
     ? detail.filter((item) => typeof item === "string")
