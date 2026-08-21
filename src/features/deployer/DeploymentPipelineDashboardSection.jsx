@@ -300,9 +300,11 @@ const formatErrorDetail = (detail) => {
   return String(detail);
 };
 
+const getErrorDetail = (error) => error?.payload?.details ?? error?.payload?.detail;
+
 const getJobErrorData = (error, fallback) => {
   const message = error?.payload?.message || error?.message || fallback;
-  const detail = formatErrorDetail(error?.payload?.detail);
+  const detail = formatErrorDetail(getErrorDetail(error));
   return { message, detail };
 };
 
@@ -769,7 +771,7 @@ export const DeploymentPipelineDashboardSection = ({
       const errorData = getJobErrorData(err, "패키지 Job 생성 중 오류가 발생했습니다.");
       setJobError(errorData.message);
       setJobErrorDetail(errorData.detail);
-      setJobErrorItems(getRegistryErrorItems(err.payload?.detail, selectedItems));
+      setJobErrorItems(getRegistryErrorItems(getErrorDetail(err), selectedItems));
       setAlertMessage(errorData.message);
       setPackagingStarted(false);
     }
