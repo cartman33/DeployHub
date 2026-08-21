@@ -1,10 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react"; // React 훅 임포트
 import {
-  ListIcon, // 리스트 아이콘
-  CodeIcon, // 코드 아이콘
-  RocketIcon, // 로켓 아이콘 (배포 관련)
-  ChevronDownIcon, // 드롭다운 화살표 아이콘
-  RefreshIcon
+  ChevronDownIcon // 드롭다운 화살표 아이콘
 } from "../../components/ui/Icons"; // UI 아이콘 컴포넌트 임포트
 import { AlertModal } from "../../components/ui/AlertModal"; // 경고 모달 컴포넌트 임포트
 import { VersionDropdown } from "../../components/ui/VersionDropdown";
@@ -284,7 +280,7 @@ export const DeveloperVersionRegistrationSection = ({
   };
 
   /**
-   * 드래그 핸들(☰)을 마우스로 눌렀을 때 해당 행을 드래그 가능(draggable=true)하게 활성화.
+   * 드래그 핸들을 마우스로 눌렀을 때 해당 행을 드래그 가능(draggable=true)하게 활성화.
    */
   const enableDrag = (index) => {
     if (trRefs.current[index]) {
@@ -522,13 +518,12 @@ export const DeveloperVersionRegistrationSection = ({
     <div className="w-full max-w-[1920px] mx-auto p-8 flex flex-col gap-8">
       {/* 헤더 섹션: 타이틀 및 설명 */}
       <header className="flex flex-col gap-2">
-        <div className="flex items-center gap-3">
-          <CodeIcon className="w-9 h-9 text-[#000666]" />
+        <div>
           <h1 className="text-4xl font-bold tracking-tight text-[#000666]">
             개발자 모드
           </h1>
         </div>
-        <p className="text-slate-500 text-base font-medium ml-12">
+        <p className="text-slate-500 text-base font-medium">
           새 메인버전을 만들거나 기존 버전의 배포 문서와 APP 정보를 관리합니다.
         </p>
       </header>
@@ -538,8 +533,7 @@ export const DeveloperVersionRegistrationSection = ({
 
         {/* 섹션 1: 메인버전 정보 설정 */}
         <section className="bg-white rounded-xl border border-slate-300 shadow-md p-6 flex flex-col gap-6">
-          <div className="flex items-center gap-2 border-b pb-4 border-slate-100">
-            <ListIcon className="w-5 h-5 text-[#000666]" />
+          <div className="border-b pb-4 border-slate-100">
             <h2 className="text-2xl font-bold text-slate-800">
               {modeType === "new" ? "새 메인버전 만들기" : "메인버전 관리"}
             </h2>
@@ -602,8 +596,7 @@ export const DeveloperVersionRegistrationSection = ({
           )}
 
           <div className="flex flex-col gap-4 border-t border-slate-100 pt-6">
-            <div className="flex items-center gap-2">
-              <ListIcon className="w-5 h-5 text-[#000666]" />
+            <div>
               <h3 className="text-xl font-bold text-slate-800">
                 {modeType === "new" ? "초기 배포 문서" : "배포 문서 (SQL / Release Note)"}
               </h3>
@@ -663,8 +656,7 @@ export const DeveloperVersionRegistrationSection = ({
         {modeType !== "new" && (
           <section className="bg-white rounded-xl border border-slate-300 shadow-md flex flex-col overflow-hidden">
             <div className="p-6 flex items-center justify-between border-b border-slate-100">
-              <div className="flex items-center gap-2">
-                <RocketIcon className="w-5 h-5 text-[#000666]" />
+              <div>
                 <h2 className="text-2xl font-bold text-slate-800">APP별 정보</h2>
               </div>
               <button
@@ -674,7 +666,6 @@ export const DeveloperVersionRegistrationSection = ({
                 className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                 title="선택한 메인버전의 최신 APP 정보를 서버에서 다시 불러옵니다."
               >
-                <RefreshIcon className={`h-4 w-4 ${loadingBase ? "animate-spin" : ""}`} />
                 {loadingBase ? "불러오는 중..." : "새로고침"}
               </button>
             </div>
@@ -714,15 +705,15 @@ export const DeveloperVersionRegistrationSection = ({
                       {/* APP 열: 앱 코드 입력 및 드래그/삭제 기능 */}
                       <td className="px-4 py-3 border-b border-slate-100 min-w-[200px]">
                         <div className="flex items-center gap-2">
-                          {/* 햄버거 아이콘: 이 부분을 드래그해야만 행 이동이 가능함 */}
+                          {/* 이동 텍스트를 잡을 때만 행 드래그를 활성화합니다. */}
                           <div
-                            className="cursor-grab text-slate-300 hover:text-slate-500 p-1 select-none"
+                            className="cursor-grab text-xs font-bold text-slate-400 hover:text-slate-600 p-1 select-none"
                             onMouseDown={() => enableDrag(index)} // 마우스 누를 때 드래그 활성화
                             onMouseUp={() => disableDrag(index)} // 뗄 때 비활성화
                             onMouseLeave={() => disableDrag(index)} // 영역 벗어날 때 비활성화 (버그 방지)
                             title="드래그하여 순서 변경"
                           >
-                            ☰
+                            이동
                           </div>
                           <div className="relative flex-1">
                             <input
@@ -730,16 +721,16 @@ export const DeveloperVersionRegistrationSection = ({
                               required
                               value={row.subVersion} // 서브버전(앱) 코드
                               onChange={(e) => handleRowChange(index, "subVersion", e.target.value)}
-                              className="w-full rounded-md border border-slate-200 bg-white py-2.5 pl-3.5 pr-8 text-sm font-bold text-[#1a237e] focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all uppercase"
+                              className="w-full rounded-md border border-slate-200 bg-white py-2.5 pl-3.5 pr-12 text-sm font-bold text-[#1a237e] focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all uppercase"
                             />
-                            {/* 행 삭제 버튼 (x 표시) */}
+                            {/* 행 삭제 버튼 */}
                             <button
                               type="button"
                               onClick={() => removeRow(index)}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 hover:text-red-500 font-bold"
+                              className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-red-500 font-bold"
                               title="항목 삭제"
                             >
-                              ✕
+                              삭제
                             </button>
                           </div>
                         </div>

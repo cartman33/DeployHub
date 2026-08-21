@@ -1,12 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 // UI 구성요소 및 아이콘을 임포트합니다.
-import { 
-  PlayIcon,
-  MonitorIcon,
-  ListIcon,
-  ClockIcon,
-  ShoppingCartIcon
-} from "../../components/ui/Icons";
 import { AlertModal } from "../../components/ui/AlertModal";
 import { VersionDropdown } from "../../components/ui/VersionDropdown";
 // 백엔드 API 호출을 위한 서비스 함수들을 임포트합니다.
@@ -737,8 +730,7 @@ export const DeploymentPipelineDashboardSection = ({
       <section className="bg-white rounded-xl border border-slate-400 shadow-lg p-5 flex flex-col gap-4 xl:flex-row xl:items-stretch">
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShoppingCartIcon className="w-5 h-5 text-slate-700" />
+            <div>
               <span className="font-extrabold text-lg text-slate-800">패키징 장바구니</span>
             </div>
             {selectedItems.length > 0 && (
@@ -782,7 +774,6 @@ export const DeploymentPipelineDashboardSection = ({
               : "bg-[#000666] text-white hover:bg-[#090d82] active:scale-[0.98] active:shadow-sm"
           }`}
         >
-          {packagingStarted ? <ClockIcon className="w-6 h-6 animate-spin" /> : <PlayIcon className="w-6 h-6 fill-current" />}
           <span className="text-xl font-extrabold uppercase tracking-wide">
             {packagingStarted ? "진행중..." : "패키징 시작"}
           </span>
@@ -796,8 +787,7 @@ export const DeploymentPipelineDashboardSection = ({
         <section className="flex-1 min-w-0 overflow-hidden bg-white rounded-xl border border-slate-400 shadow-lg flex flex-col h-[820px]">
           {/* 상단 툴바 및 필터 영역 */}
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col gap-3 sticky top-0 z-20">
-            <div className="flex items-center gap-2">
-              <ListIcon className="w-6 h-6 text-[#000666]" />
+            <div>
               <h2 className="text-xl font-extrabold text-slate-800">현재 버전</h2>
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -877,8 +867,7 @@ export const DeploymentPipelineDashboardSection = ({
           {/* 상단 툴바 및 필터 영역 */}
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col gap-3 sticky top-0 z-20">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <MonitorIcon className="w-6 h-6 text-indigo-700" />
+              <div>
                 <h2 className="text-xl font-extrabold text-indigo-900">업데이트 버전</h2>
               </div>
             </div>

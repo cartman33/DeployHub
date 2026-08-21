@@ -154,6 +154,29 @@ export const JobManagementPage = () => {
     }
   };
 
+  const handleRefreshJobs = async () => {
+    const versionNameToRefresh = expandedVersionName;
+    if (versionNameToRefresh) {
+      setDetailLoading(true);
+      setDetailError("");
+    }
+
+    // 목록과 현재 펼쳐진 상세를 동시에 갱신해 진행률, 항목 상태와 결과 URL의 시점을 맞춘다.
+    const [, detailResult] = await Promise.allSettled([
+      fetchJobs(),
+      versionNameToRefresh ? getPackageJob(versionNameToRefresh) : Promise.resolve(null),
+    ]);
+
+    if (!isMounted.current || !versionNameToRefresh) return;
+    if (detailResult.status === "fulfilled") {
+      setExpandedJobDetail(detailResult.value);
+    } else {
+      const err = detailResult.reason;
+      setDetailError(err?.payload?.message || err?.message || "JOB 상세 정보를 새로고침하지 못했습니다.");
+    }
+    setDetailLoading(false);
+  };
+
   const handleCopyResults = async (event) => {
     event.stopPropagation();
     const detail = expandedJobDetail;
@@ -302,13 +325,13 @@ export const JobManagementPage = () => {
           </button>
           <button
             type="button"
-            onClick={fetchJobs}
-            disabled={loading}
+            onClick={handleRefreshJobs}
+            disabled={loading || detailLoading}
             aria-label="JOB 목록 새로고침"
             title="새로고침"
-            className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-base font-bold text-slate-600 shadow-sm transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex h-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 shadow-sm transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <span className={loading ? "animate-spin" : ""}>↻</span>
+            새로고침
           </button>
         </div>
       </div>

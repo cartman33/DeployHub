@@ -1,10 +1,6 @@
 // React의 상태 관리 및 생명주기 훅을 불러옵니다.
 import { useState, useEffect } from "react";
 // 사용되는 아이콘 컴포넌트들을 불러옵니다.
-import { 
-  RocketIcon, 
-  CodeIcon
-} from "../components/ui/Icons";
 // 배포자 모드 및 개발자 모드 대시보드 컴포넌트를 불러옵니다.
 import { DeploymentPipelineDashboardSection } from "../features/deployer/DeploymentPipelineDashboardSection";
 import { DeveloperVersionRegistrationSection } from "../features/developer/DeveloperVersionRegistrationSection";
@@ -233,19 +229,11 @@ export const HtmlBody = () => {
         {/* 상단 헤더 영역 */}
         <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b border-[#e0e4ec] bg-white px-8 shadow-sm">
           <div className="flex items-center gap-4">
-            {/* 로고 및 새로고침 버튼 */}
+            {/* 서비스명 및 새로고침 버튼 */}
             <button 
               onClick={() => window.location.reload()}
-              className="flex items-center gap-2 hover:opacity-80 transition-opacity cursor-pointer text-left focus:outline-none"
+              className="hover:opacity-80 transition-opacity cursor-pointer text-left focus:outline-none"
             >
-              {/* 활성화된 모드에 따라 아이콘을 다르게 표시합니다. */}
-              {activeNavigation === "deployer" ? (
-                <RocketIcon className="w-6 h-6 text-[#000666]" />
-              ) : activeNavigation === "developer" ? (
-                <CodeIcon className="w-5 h-5 text-[#000666]" />
-              ) : (
-                <span className="text-xl">🛠️</span>
-              )}
               <h1 className="text-xl font-bold tracking-tight text-[#000666]">
                 Deploy Hub
               </h1>
@@ -258,29 +246,29 @@ export const HtmlBody = () => {
               <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shadow-inner">
                 <button
                   onClick={() => setActiveNavigation("deployer")}
-                  className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all flex items-center gap-1.5 ${
+                  className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all ${
                     activeNavigation === "deployer" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
-                  <span>🚀</span> 배포자 모드
+                  배포자 모드
                 </button>
                 <button
                   onClick={() => setActiveNavigation("job_management")}
-                  className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all flex items-center gap-1.5 ${
+                  className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all ${
                     activeNavigation === "job_management" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
                   }`}
                 >
-                  <span>🛠️</span> JOB 관리
+                  JOB 관리
                 </button>
               </div>
               <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shadow-inner">
               <button
                 onClick={() => setActiveNavigation("developer")}
-                className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all flex items-center gap-1.5 ${
+                className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all ${
                   activeNavigation === "developer" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
                 }`}
               >
-                <span>👨‍💻</span> 개발자 모드
+                개발자 모드
               </button>
               </div>
             </div>
