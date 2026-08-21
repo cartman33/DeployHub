@@ -282,6 +282,30 @@ const compareVersionNames = (leftName, rightName) => {
   return 0;
 };
 
+const formatErrorDetail = (detail) => {
+  if (detail == null || detail === "") return "";
+  if (Array.isArray(detail)) {
+    return detail.map((item) => `- ${typeof item === "object" ? JSON.stringify(item) : item}`).join("\n");
+  }
+  if (typeof detail === "object") {
+    return Object.entries(detail).map(([key, value]) => {
+      const formattedValue = Array.isArray(value)
+        ? value.join(", ")
+        : typeof value === "object" && value !== null
+          ? JSON.stringify(value)
+          : String(value);
+      return `${key}: ${formattedValue}`;
+    }).join("\n");
+  }
+  return String(detail);
+};
+
+const getJobErrorMessage = (error, fallback) => {
+  const message = error?.payload?.message || error?.message || fallback;
+  const detail = formatErrorDetail(error?.payload?.detail);
+  return detail ? `${message}\n${detail}` : message;
+};
+
 export const DeploymentPipelineDashboardSection = ({ 
   versions, 
   setSelectedVersionName,
@@ -584,6 +608,11 @@ export const DeploymentPipelineDashboardSection = ({
     setSelectedItems([]);
   }, [rightVersionName]);
 
+  // 패키징 오류는 선택 당시 버전에 종속되므로 좌우 버전이 바뀌면 이전 오류를 제거합니다.
+  useEffect(() => {
+    setJobError("");
+  }, [leftVersionName, rightVersionName]);
+
   // 자격 조회 결과 PENDING 등이 확인되면 이미 선택했던 항목도 즉시 제거합니다.
   useEffect(() => {
     if (selectionBlocked) setSelectedItems([]);
@@ -657,7 +686,7 @@ export const DeploymentPipelineDashboardSection = ({
       if (!isMountedRef.current) return; // 에러 캐치 직후에도 언마운트 확인
       
       // 에러가 발생한 경우 상태를 기록하고 폴링 종료
-      setJobError(err.message);
+      setJobError(getJobErrorMessage(err, "패키징 상태 조회 중 오류가 발생했습니다."));
       setJobPolling(false);
       setPackagingStarted(false);
     }
@@ -711,8 +740,9 @@ export const DeploymentPipelineDashboardSection = ({
       pollJob();
     } catch (err) {
       // 에러 발생 시 UI에 에러를 표시하고 로딩 상태를 해제합니다.
-      setJobError(err.payload?.message || err.message || "패키지 Job 생성 중 오류가 발생했습니다.");
-      setAlertMessage(err.payload?.message || err.message || "패키지 Job 생성 중 오류가 발생했습니다.");
+      const errorMessage = getJobErrorMessage(err, "패키지 Job 생성 중 오류가 발생했습니다.");
+      setJobError(errorMessage);
+      setAlertMessage(errorMessage);
       setPackagingStarted(false);
     }
   };
@@ -759,7 +789,7 @@ export const DeploymentPipelineDashboardSection = ({
             )}
           </div>
           {jobError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-600">
+            <div className="whitespace-pre-wrap break-words rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-600">
               {jobError}
             </div>
           )}
