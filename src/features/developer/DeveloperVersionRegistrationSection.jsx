@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react"; // React 훅 임포트
 import { 
-  CheckCircleIcon,  // 체크 아이콘
   ListIcon, // 리스트 아이콘
   CodeIcon, // 코드 아이콘
   RocketIcon, // 로켓 아이콘 (배포 관련)
@@ -36,8 +35,7 @@ const getTodayDateString = () => {
 export const DeveloperVersionRegistrationSection = ({ 
   versions, // 전체 버전 목록
   setVersions, // 버전 목록 업데이트 함수
-  setSelectedVersionName, // 선택된 버전명 업데이트 함수
-  setActiveNavigation // 활성화된 내비게이션 탭 설정 함수
+  setSelectedVersionName // 선택된 버전명 업데이트 함수
 }) => {
   const dateInputRef = useRef(null); // 날짜 입력 필드에 접근하기 위한 ref 생성
 
@@ -47,7 +45,6 @@ export const DeveloperVersionRegistrationSection = ({
   const [selectedDate, setSelectedDate] = useState(getTodayDateString()); // 사용자가 선택한 날짜 (기본값: 오늘)
   const [modeType, setModeType] = useState("new"); // "new" (신규 등록 모드) 또는 "edit" (수정 모드)
   const [editVersionMode, setEditVersionMode] = useState(""); // 수정 모드일 때 선택된 버전의 접미사 (예: "-1")
-  const [submittedModeType, setSubmittedModeType] = useState("new"); // 제출 완료 시 성공 모달에서 보여줄 모드 타입
   
   const [rows, setRows] = useState([]); // 테이블에 렌더링될 서브버전 행 데이터 목록
   const [sqlScript, setSqlScript] = useState(""); // 입력된 SQL 스크립트 내용
@@ -55,8 +52,6 @@ export const DeveloperVersionRegistrationSection = ({
   const [alertMessage, setAlertMessage] = useState("");
     const [alertType, setAlertType] = useState("warning"); // 화면에 띄울 경고창 메시지
 
-  const [showSuccessModal, setShowSuccessModal] = useState(false); // 성공 모달 표시 여부 플래그
-  const [registeredVersionName, setRegisteredVersionName] = useState(""); // 방금 등록/수정 완료된 버전의 이름
   
   const [saving, setSaving] = useState(false); // API 저장 중 여부를 나타내는 로딩 상태
   const [submitError, setSubmitError] = useState("");
@@ -129,7 +124,9 @@ export const DeveloperVersionRegistrationSection = ({
       return {
         id: `row_${sub.code || index}_${Date.now()}`,
         subVersion: sub.code || "",
-        component: sub.components?.length > 0 ? sub.components.map(c => c.imageTag).join('\n') : sub.code,
+        component: sub.components?.length > 0
+          ? sub.components.map(c => c.imageTag).join('\n')
+          : "",
         tag: sub.version || "",
         note: pureNote,
         status: statusValue,
@@ -251,6 +248,9 @@ export const DeveloperVersionRegistrationSection = ({
   const handleRowChange = (index, field, value) => {
     const newRows = [...rows]; // 배열 복사
     newRows[index][field] = value; // 지정된 인덱스와 필드에 새로운 값 대입
+    if (field === "subVersion" && value.trim().toUpperCase() === "EXT") {
+      newRows[index].component = "";
+    }
     setRows(newRows); // 상태 업데이트
   };
 
@@ -261,7 +261,7 @@ export const DeveloperVersionRegistrationSection = ({
     setRows([...rows, {
       id: `custom_${Date.now()}`, // 고유 ID 발급
       subVersion: "NEW", // 기본값
-      component: "new-component", // 기본값
+      component: "", // IMAGE TAG는 선택 입력
       tag: "", // 빈 태그
       note: "", // 빈 노트
       status: "update", // 기본 상태
@@ -374,7 +374,9 @@ export const DeveloperVersionRegistrationSection = ({
       payload.note = finalNote;
     }
 
-    if (row.component) {
+    if (row.subVersion.trim().toUpperCase() === "EXT") {
+      payload.imageTags = [];
+    } else if (row.component) {
       payload.imageTags = row.component.split('\n').map(t => t.trim()).filter(Boolean);
     }
 
@@ -398,79 +400,27 @@ export const DeveloperVersionRegistrationSection = ({
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault(); // 기본 폼 제출(페이지 새로고침) 동작 방지
+  const handleUpdateMainVersionInfo = async () => {
+    const prefix = selectedDate.replace(/-/g, '.');
+    const targetVersionName = editVersionMode ? `${prefix}-${editVersionMode}` : prefix;
 
-    const prefix = selectedDate.replace(/-/g, '.'); // 버전 접두어 (YYYY.MM.DD)
-    // 등록할 또는 수정할 타겟 버전 이름 생성
-    const targetVersionName = modeType === "new" 
-        ? (maxSuffix >= 0 ? `${prefix}-${maxSuffix + 1}` : prefix) 
-        : (editVersionMode ? `${prefix}-${editVersionMode}` : prefix);
-
-    setSaving(true); // 저장 로딩 상태 시작
-    setSubmitError(""); // 이전 제출 에러 초기화
-
+    setSaving(true);
+    setSubmitError("");
     try {
-      if (modeType === "new") {
-        try {
-          // 신규 버전 생성 API 호출
-          await createMainVersion(targetVersionName, {
-            releaseNote: releaseNote || undefined,
-            sqlScript: sqlScript || undefined,
-          });
-        } catch (error) {
-          // 409(Conflict) 에러는 이미 버전이 생성되었음을 의미하므로 무시하고 진행
-          if (error.status !== 409) {
-            throw error; // 다른 에러는 그대로 던짐
-          }
-        }
-      } else {
-        // 기존 버전 수정 API 호출
-        await updateMainVersion(targetVersionName, {
-          releaseNote: releaseNote || undefined,
-          sqlScript: sqlScript || undefined,
-        });
-      }
-
-      // 상위 컴포넌트의 versions 목록 상태 갱신
-      const exists = versions.some(v => v.versionName === targetVersionName); // 목록에 이미 존재하는지 확인
-      
-      if (!exists) {
-        const newSummary = {
-          versionName: targetVersionName,
-          subVersionCount: 0,
-          componentCount: 0,
-          lastJob: null, // 최신 작업 내역 초기화
-        };
-        setVersions([newSummary, ...versions]); // 없으면 맨 앞에 추가
-      }
-
-      setSelectedVersionName(targetVersionName); // 컨텍스트의 선택된 버전 업데이트
-      setRegisteredVersionName(targetVersionName); // 성공 모달에 표시될 버전명 기록
-      setSubmittedModeType(modeType); // 성공 모달에 표시될 텍스트 모드 기록
-      setShowSuccessModal(true); // 성공 모달 표시
-
-      if (modeType === "new") {
-        // 신규 등록이었다면, 다음 수정을 위해 모드를 'edit'으로 변경하고 인덱스를 올림
-        setModeType("edit");
-        setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
-      }
+      await updateMainVersion(targetVersionName, {
+        releaseNote,
+        sqlScript,
+      });
+      setAlertType("success");
+      setAlertMessage(`메인버전 ${targetVersionName}의 SQL과 Release Note가 수정되었습니다.`);
     } catch (error) {
-      // 에러 처리: 화면 하단이나 모달로 에러 메시지 표시
-      const message = error.payload?.message || error.message || "메인버전 등록/수정 중 오류가 발생했습니다.";
+      const message = error.payload?.message || error.message || "메인버전 정보 수정 중 오류가 발생했습니다.";
       setSubmitError(message);
-      setAlertType("warning"); setAlertMessage(message);
+      setAlertType("warning");
+      setAlertMessage(message);
     } finally {
-      setSaving(false); // 저장 로딩 상태 해제
+      setSaving(false);
     }
-  };
-
-  /**
-   * 성공 모달에서 '배포 파이프라인으로 이동' 버튼 클릭 시의 동작
-   */
-  const handleGoToDeployer = () => {
-    setShowSuccessModal(false); // 성공 모달 닫기
-    setActiveNavigation("deployer"); // 전역 네비게이션을 'deployer'(배포자 탭)으로 전환
   };
 
   // ==========================================
@@ -491,8 +441,8 @@ export const DeveloperVersionRegistrationSection = ({
         </p>
       </header>
 
-      {/* 메인 폼 래퍼 */}
-      <form onSubmit={handleSubmit} className="flex flex-col gap-8">
+      {/* 메인 편집 영역 */}
+      <div className="flex flex-col gap-8">
         
         {/* 섹션 1: 메인버전 정보 설정 */}
         <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-6">
@@ -574,6 +524,37 @@ export const DeveloperVersionRegistrationSection = ({
               </div>
             </div>
           </div>
+
+          {modeType !== "new" && (
+            <div className="flex flex-col gap-4 border-t border-slate-100 pt-6">
+              <div className="flex items-center gap-2">
+                <ListIcon className="w-5 h-5 text-[#000666]" />
+                <h3 className="text-xl font-bold text-slate-800">SQL / Release Note</h3>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="flex flex-col gap-2">
+                  <label className="text-base font-bold text-slate-500 uppercase tracking-wider">SQL Script</label>
+                  <textarea
+                    value={sqlScript}
+                    onChange={(e) => setSqlScript(e.target.value)}
+                    placeholder="이번 배포에 적용할 DB SQL 스크립트를 입력하세요."
+                    rows={6}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 py-3.5 px-4 text-base font-mono text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all resize-y"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <label className="text-base font-bold text-slate-500 uppercase tracking-wider">Release Note</label>
+                  <textarea
+                    value={releaseNote}
+                    onChange={(e) => setReleaseNote(e.target.value)}
+                    placeholder="고객사 전달용 릴리즈 노트를 입력하세요."
+                    rows={6}
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 py-3.5 px-4 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all resize-y"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
           
           {/* 입력 폼 리셋 및 새로고침 버튼 영역 대신 신규 등록 버튼 표시 */}
           {modeType === "new" && (
@@ -588,42 +569,19 @@ export const DeveloperVersionRegistrationSection = ({
               </button>
             </div>
           )}
-        </section>
-
-        {/* 섹션 2: SQL 및 릴리즈 노트 입력 영역 */}
-        {modeType !== "new" && (
-        <section className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 flex flex-col gap-6">
-          <div className="flex items-center gap-2 border-b pb-4 border-slate-100">
-            <ListIcon className="w-5 h-5 text-[#000666]" />
-            <h2 className="text-2xl font-bold text-slate-800">SQL / Release Note</h2>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="flex flex-col gap-2">
-              <label className="text-base font-bold text-slate-500 uppercase tracking-wider">SQL Script</label>
-              {/* SQL 스크립트 입력 텍스트에리어 */}
-              <textarea
-                value={sqlScript}
-                onChange={(e) => setSqlScript(e.target.value)}
-                placeholder="이번 배포에 적용할 DB SQL 스크립트를 입력하세요."
-                rows={6}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 py-3.5 px-4 text-base font-mono text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all resize-y"
-              />
+          {modeType !== "new" && (
+            <div className="flex justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={handleUpdateMainVersionInfo}
+                disabled={saving || loadingBase}
+                className={`py-2.5 px-8 text-base font-bold text-white bg-[#000666] hover:bg-[#090d82] rounded-lg transition-all shadow-sm active:scale-95 ${saving || loadingBase ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                {saving ? "수정 중..." : "메인버전 수정"}
+              </button>
             </div>
-            <div className="flex flex-col gap-2">
-              <label className="text-base font-bold text-slate-500 uppercase tracking-wider">Release Note</label>
-              {/* 릴리즈 노트 입력 텍스트에리어 */}
-              <textarea
-                value={releaseNote}
-                onChange={(e) => setReleaseNote(e.target.value)}
-                placeholder="고객사 전달용 릴리즈 노트를 입력하세요."
-                rows={6}
-                className="w-full rounded-lg border border-slate-200 bg-slate-50 py-3.5 px-4 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all resize-y"
-              />
-            </div>
-          </div>
+          )}
         </section>
-        )}
 
         {/* 섹션 3: 매니페스트 (서브버전) 상세 정보 입력 테이블 */}
         {modeType !== "new" && (
@@ -642,7 +600,7 @@ export const DeveloperVersionRegistrationSection = ({
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider w-[15%]">APP</th>
                   <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider w-[15%]">VERSION <span className="text-red-500">*</span></th>
-                  <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider w-[23%]">IMAGE TAG <span className="text-red-500">*</span></th>
+                  <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider w-[23%]">IMAGE TAG <span className="text-xs text-slate-400">(선택)</span></th>
                   <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider w-[25%]">NOTE</th>
                   <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider w-[12%]">상태</th>
                 </tr>
@@ -705,12 +663,12 @@ export const DeveloperVersionRegistrationSection = ({
                     {/* IMAGE TAG 열: 도커 이미지 정보 입력 */}
                     <td className="px-4 py-3 border-b border-slate-100">
                       <textarea
-                        required
+                        disabled={row.subVersion.trim().toUpperCase() === "EXT"}
                         value={row.component} // 컴포넌트 정보 및 이미지 태그들
                         onChange={(e) => handleRowChange(index, "component", e.target.value)}
-                        placeholder="예: myapp-api:v2.0.27"
+                        placeholder={row.subVersion.trim().toUpperCase() === "EXT" ? "IMAGE TAG 없음" : "예: myapp-api:v2.0.27"}
                         rows={2} // 멀티라인 지원 (CC의 경우 API/FE 두 줄)
-                        className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all font-mono resize-y min-h-[42px]"
+                        className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all font-mono resize-y min-h-[42px] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
                       />
                     </td>
                     {/* NOTE 열: 해당 컴포넌트의 변경 사항 기록 */}
@@ -788,37 +746,7 @@ export const DeveloperVersionRegistrationSection = ({
         )}
         
         
-      </form>
-
-      {/* 완료 모달: 등록 성공 후 보여지는 오버레이 화면.
-          참고: 추후 재사용 가능한 AlertModal이나 ConfirmModal 같은 별도의 컴포넌트로 추출(Extract)하는 것이 유지보수에 좋을 수 있으나, 현재로서는 인라인으로도 무방함. */}
-      {showSuccessModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
-          <div className="bg-white rounded-2xl border border-slate-200 p-8 max-w-md w-full shadow-2xl flex flex-col items-center text-center gap-5">
-            <div className="w-16 h-16 rounded-full bg-green-50 text-green-500 flex items-center justify-center shadow-inner">
-              <CheckCircleIcon className="w-10 h-10" />
-            </div>
-            <div className="flex flex-col gap-2">
-              <h3 className="text-3xl font-bold text-slate-800">
-                {submittedModeType === "new" ? "버전 등록 완료!" : "버전 수정 완료!"}
-              </h3>
-              <p className="text-base text-slate-500 leading-relaxed px-2">
-                메인 버전 <strong className="text-[#000666] font-mono">{registeredVersionName}</strong>의 매니페스트가 성공적으로 처리되었습니다.
-              </p>
-            </div>
-            <div className="flex flex-col gap-2 w-full mt-2">
-              {/* 배포 파이프라인(디플로이어) 화면으로 넘어가는 버튼 */}
-              <button
-                type="button"
-                onClick={handleGoToDeployer}
-                className="w-full py-3 bg-[#000666] hover:bg-[#090d82] text-white font-bold rounded-xl shadow-lg hover:shadow-indigo-100 transition-all text-base"
-              >
-                배포 파이프라인(배포자)으로 이동
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* 전역적으로 사용되는 알림창 컴포넌트 */}
       <AlertModal 

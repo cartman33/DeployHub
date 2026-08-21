@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { listPackageJobs, deletePackage, runAdminCleanup, getPackageJobFiles } from "../../services/api";
+import { listPackageJobs, deletePackage, runAdminCleanup, getPackageJobFiles, retryPackageJob } from "../../services/api";
+
+const PACKAGE_DELETE_ALLOWED_STATUSES = new Set(["DONE", "FAILED"]);
 
 export const JobManagementPage = () => {
   // 상태 관리: Job 목록, 상태 필터, 로딩 상태, 에러 메시지
@@ -7,6 +9,7 @@ export const JobManagementPage = () => {
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [retryingVersionName, setRetryingVersionName] = useState("");
 
   // [개선/최적화] 컴포넌트 마운트 상태를 추적하여 언마운트 시 상태 업데이트 방지 (메모리 누수 방지)
   const isMounted = useRef(true);
@@ -61,16 +64,37 @@ export const JobManagementPage = () => {
     fetchJobs();
   }, [fetchJobs]);
 
-  const handleDelete = async (versionName) => {
-    if (!window.confirm(`정말로 [${versionName}]의 패키지 Job을 삭제하시겠습니까?`)) {
+  const handleDelete = async (versionName, status) => {
+    if (!PACKAGE_DELETE_ALLOWED_STATUSES.has(status)) {
+      alert("진행 중인 Job의 패키지 산출물은 삭제할 수 없습니다.");
+      return;
+    }
+    if (!window.confirm(`[${versionName}]의 패키지 산출물 파일을 삭제하시겠습니까?\nJob 이력은 삭제되지 않습니다.`)) {
       return;
     }
     try {
       await deletePackage(versionName);
-      alert("성공적으로 삭제되었습니다.");
+      alert("패키지 산출물이 삭제되었습니다. Job 이력은 유지됩니다.");
       fetchJobs(); // 재로딩
     } catch (err) {
-      alert(err.payload?.message || err.message || "삭제 중 오류가 발생했습니다.");
+      alert(err.payload?.message || err.message || "패키지 산출물 삭제 중 오류가 발생했습니다.");
+    }
+  };
+
+  const handleRetry = async (versionName) => {
+    if (!window.confirm(`[${versionName}]의 실패한 패키징 작업을 재시도하시겠습니까?`)) {
+      return;
+    }
+
+    setRetryingVersionName(versionName);
+    try {
+      await retryPackageJob(versionName, { imageTags: [], force: true });
+      alert("재시도 요청이 접수되었습니다.");
+      await fetchJobs();
+    } catch (err) {
+      alert(err.payload?.message || err.message || "재시도 요청 중 오류가 발생했습니다.");
+    } finally {
+      setRetryingVersionName("");
     }
   };
 
@@ -224,12 +248,27 @@ export const JobManagementPage = () => {
                         삭제됨
                       </span>
                     ) : (
-                      <button
-                        onClick={() => handleDelete(job.versionName)}
-                        className="px-4 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 font-bold rounded text-sm transition-colors"
-                      >
-                        삭제
-                      </button>
+                      <div className="flex items-center gap-2">
+                        {job.status === "FAILED" && (
+                          <button
+                            type="button"
+                            onClick={() => handleRetry(job.versionName)}
+                            disabled={retryingVersionName === job.versionName}
+                            className="px-4 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 font-bold rounded text-sm transition-colors border border-amber-200 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                          >
+                            {retryingVersionName === job.versionName ? "재시도 중..." : "재시도"}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDelete(job.versionName, job.status)}
+                          disabled={retryingVersionName === job.versionName || !PACKAGE_DELETE_ALLOWED_STATUSES.has(job.status)}
+                          title={PACKAGE_DELETE_ALLOWED_STATUSES.has(job.status) ? "패키지 산출물 파일 삭제" : "진행 중인 Job의 패키지는 삭제할 수 없습니다."}
+                          className="px-4 py-1.5 bg-red-50 text-red-600 hover:bg-red-100 font-bold rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          패키지 삭제
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>

@@ -106,7 +106,7 @@ const CheckIcon = ({ className }) => (
  * @param {function} toggleItem - 단일 아이템 토글 핸들러
  * @param {function} toggleAllItems - 전체 선택 토글 핸들러
  */
-const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleItem, toggleAllItems }) => {
+const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleItem, toggleAllItems, selectionDisabled = false }) => {
   // 매번 렌더링되지 않도록 상세 데이터를 기반으로 행(row) 데이터를 메모이제이션합니다.
   const rows = useMemo(() => {
     // 상세 정보가 없으면 빈 배열을 반환합니다.
@@ -161,8 +161,8 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
         statusClass = "bg-orange-100 text-orange-700 font-bold border border-orange-200";
       }
       
-      // 컴포넌트 정보가 있다면 이미지 태그를 묶고, 없으면 코드:버전 포맷을 사용합니다.
-      const imageTags = item.components?.length > 0 ? item.components.map(c => c.imageTag).join('\n') : `${item.code}:${item.version}`;
+      // 실제 컴포넌트가 없으면 IMAGE TAG를 임의로 만들지 않습니다.
+      const imageTags = item.components?.length > 0 ? item.components.map(c => c.imageTag).join('\n') : "";
       // 노트 텍스트 초기화 (없으면 '-')
       const pureNote = item.note || "-";
       
@@ -220,7 +220,8 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
                     <button
                       type="button"
                       onClick={() => toggleAllItems && toggleAllItems(versionName, rows)}
-                      className="text-[10px] font-bold bg-white border border-slate-300 hover:border-indigo-400 hover:bg-slate-50 text-slate-700 px-1 py-0.5 rounded shadow-sm whitespace-nowrap transition-colors"
+                      disabled={selectionDisabled || !rows.some(row => row.imageTags)}
+                      className="text-[10px] font-bold bg-white border border-slate-300 hover:border-indigo-400 hover:bg-slate-50 text-slate-700 px-1 py-0.5 rounded shadow-sm whitespace-nowrap transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                       전체선택
                     </button>
@@ -228,8 +229,9 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
                 </th>
               )}
               {/* 컬럼명 정의 */}
-              <th className="px-2 py-3 w-[15%] text-sm font-extrabold text-slate-600 uppercase tracking-wider">APP</th>
-              <th className="px-2 py-3 w-[35%] text-sm font-extrabold text-slate-600 uppercase tracking-wider">IMAGE TAG</th>
+              <th className="px-2 py-3 w-[12%] text-sm font-extrabold text-slate-600 uppercase tracking-wider">APP</th>
+              <th className="px-2 py-3 w-[14%] text-sm font-extrabold text-slate-600 uppercase tracking-wider">VERSION</th>
+              <th className="px-2 py-3 w-[27%] text-sm font-extrabold text-slate-600 uppercase tracking-wider">IMAGE TAG</th>
               <th className="px-2 py-3 text-sm font-extrabold text-slate-600 uppercase tracking-wider">NOTE</th>
               <th className="px-2 py-3 w-[15%] text-sm font-extrabold text-slate-600 uppercase tracking-wider">STATUS</th>
             </tr>
@@ -240,6 +242,7 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
             {rows.map((row) => {
               // 현재 항목이 장바구니(selectedItems)에 담겨있는지 여부 확인
               const isSelected = selectedItems && selectedItems.some(i => i.code === row.code && i.versionName === versionName);
+              const rowSelectionDisabled = selectionDisabled || !row.imageTags;
               
               return (
                 <tr key={row.key} className={`transition-colors ${row.highlighted ? "bg-indigo-50/20" : "hover:bg-slate-50"}`}>
@@ -250,10 +253,13 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
                       <button
                         type="button"
                         onClick={() => toggleItem({ ...row, versionName })}
+                        disabled={rowSelectionDisabled}
+                        title={!row.imageTags ? "IMAGE TAG가 없어 패키징 대상이 아닙니다." : selectionDisabled ? "PENDING 항목이 있어 선택할 수 없습니다." : ""}
                         className={`w-7 h-7 rounded flex items-center justify-center border-2 transition-all shadow-sm mx-auto ${
                           isSelected 
                             ? "bg-green-500 border-green-500" // 선택된 상태의 스타일
                             : "bg-white border-slate-300 hover:border-indigo-400" // 선택되지 않은 상태의 스타일
+                        } ${rowSelectionDisabled ? "opacity-40 cursor-not-allowed bg-slate-100" : ""
                         }`}
                       >
                         {/* 선택 시 체크 아이콘 표시 */}
@@ -265,13 +271,17 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
                   <td className="px-2 py-3 text-sm font-extrabold text-slate-800 align-top">
                     {row.code}
                   </td>
+                  {/* VERSION 셀 */}
+                  <td className="px-2 py-3 text-sm font-bold text-slate-700 align-top break-all">
+                    {row.tag}
+                  </td>
                   {/* IMAGE TAG 셀 */}
                   <td className="px-2 py-3 align-top break-all">
                     <div className="flex flex-col gap-1">
                       {/* 줄바꿈 단위로 이미지 태그들을 분리하여 렌더링 */}
                       {row.imageTags ? row.imageTags.split('\n').map((line, i) => (
                         <span key={i} className="text-[13px] font-bold text-slate-800 font-mono leading-tight">{line}</span>
-                      )) : <span className="text-[13px] text-slate-400">-</span>}
+                      )) : <span className="text-[13px] font-bold text-slate-400">없음</span>}
                     </div>
                   </td>
                   {/* NOTE 셀 */}
@@ -303,32 +313,78 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
 // ==========================================
 // [Main Component] 배포자(Deployer) 대시보드 메인 컴포넌트
 // ==========================================
+const compareVersionNames = (leftName, rightName) => {
+  const parseVersionName = (versionName) => {
+    const match = /^(\d{4})\.(\d{2})\.(\d{2})(?:-(\d+))?$/.exec(versionName || "");
+    return match ? match.slice(1).map((value) => Number(value || 0)) : null;
+  };
+  const leftParts = parseVersionName(leftName);
+  const rightParts = parseVersionName(rightName);
+
+  if (!leftParts || !rightParts) {
+    return String(leftName).localeCompare(String(rightName), undefined, { numeric: true });
+  }
+  for (let index = 0; index < leftParts.length; index += 1) {
+    if (leftParts[index] !== rightParts[index]) return leftParts[index] - rightParts[index];
+  }
+  return 0;
+};
+
 export const DeploymentPipelineDashboardSection = ({ 
   versions, 
-  selectedVersionName, 
   setSelectedVersionName,
-  reloadVersions
+  hasMore,
+  totalVersionCount,
+  loadingVersions,
+  loadingMoreVersions,
+  loadMoreVersions,
+  searchVersionOptions,
+  ensureVersionLoaded
 }) => {
   // 좌측 패널의 검색어 상태를 관리합니다.
   const [leftSearch, setLeftSearch] = useState("");
+  const [leftSearchResults, setLeftSearchResults] = useState(null);
+  const [leftSearchLoading, setLeftSearchLoading] = useState(false);
   // 우측 패널의 검색어 상태를 관리합니다.
   const [rightSearch, setRightSearch] = useState("");
+  const [rightSearchResults, setRightSearchResults] = useState(null);
+  const [rightSearchLoading, setRightSearchLoading] = useState(false);
+  const [selectingVersionSide, setSelectingVersionSide] = useState("");
   // [추가됨] 배포자 페이지 좌측 컴포넌트 목록 페이징 처리 상태
-  const [leftVisibleCount, setLeftVisibleCount] = useState(5);
-  const itemsPerPage = 5;
+  const [leftPage, setLeftPage] = useState(0);
   
   // 좌측 기준 버전의 기본값을 결정합니다 (두 번째 요소가 있으면 두 번째, 없으면 첫 번째).
-  const defaultLeft = versions.length > 1 ? versions[1]?.versionName : versions[0]?.versionName;
-  // 좌측 패널에 선택된 버전명을 관리하는 상태입니다.
-  const [leftVersionName, setLeftVersionName] = useState(defaultLeft || "");
+  // 배포자 모드에 처음 진입하면 사용자가 비교할 버전을 직접 선택하도록 비워 둡니다.
+  const [leftVersionName, setLeftVersionName] = useState("");
   // 우측 패널(배포 대상)에 선택된 버전명을 관리하는 상태입니다.
-  const [rightVersionName, setRightVersionName] = useState(selectedVersionName || versions[0]?.versionName || "");
+  const [rightVersionName, setRightVersionName] = useState("");
+
+  const leftVersionOptions = useMemo(() => {
+    const filtered = leftSearchResults ?? versions;
+    const selectedVersion = versions.find((version) => version.versionName === leftVersionName);
+
+    return selectedVersion && !filtered.some((version) => version.versionName === leftVersionName)
+      ? [selectedVersion, ...filtered]
+      : filtered;
+  }, [versions, leftSearchResults, leftVersionName]);
+
+  const rightVersionOptions = useMemo(() => {
+    const filtered = rightSearchResults ?? versions;
+    const selectedVersion = versions.find((version) => version.versionName === rightVersionName);
+
+    return selectedVersion && !filtered.some((version) => version.versionName === rightVersionName)
+      ? [selectedVersion, ...filtered]
+      : filtered;
+  }, [versions, rightSearchResults, rightVersionName]);
+
+  const versionRangeInvalid = leftVersionName
+    && rightVersionName
+    && compareVersionNames(rightVersionName, leftVersionName) < 0;
   
   // API 호출을 줄이기 위해 불러온 버전의 상세 정보를 임시로 저장하는 상태입니다.
   const [detailsCache, setDetailsCache] = useState({});
     const fetchingRef = useRef(new Set());
     // [추가됨] 페이지 이동 시 스크롤을 상단으로 리셋하기 위한 Ref
-    const leftScrollRef = useRef(null);
     
     // 패키징할 목적으로 선택된(체크된) 서브버전 아이템들을 보관하는 장바구니 상태입니다.
   const [selectedItems, setSelectedItems] = useState([]);
@@ -345,10 +401,83 @@ export const DeploymentPipelineDashboardSection = ({
   const [jobError, setJobError] = useState("");
   // 현재 버전이 패키징 가능한 상태인지에 대한 자격 여부 정보입니다.
   const [eligibility, setEligibility] = useState(null);
+  const [eligibilityChecking, setEligibilityChecking] = useState(false);
   // 자격 여부 확인 중 발생한 에러 메시지입니다.
   const [eligibilityError, setEligibilityError] = useState("");
-  // 사용자에게 띄울 안내/경고 메시지입니다 (현재 경고창 컴포넌트는 사용하지 않지만 상태는 유지).
+  // 사용자에게 띄울 안내/경고 메시지입니다.
   const [alertMessage, setAlertMessage] = useState("");
+
+  const handleVersionSearch = async (side) => {
+    const keyword = side === "left" ? leftSearch.trim() : rightSearch.trim();
+    const setResults = side === "left" ? setLeftSearchResults : setRightSearchResults;
+    const setSearching = side === "left" ? setLeftSearchLoading : setRightSearchLoading;
+
+    if (!keyword) {
+      setResults(null);
+      return;
+    }
+
+    setSearching(true);
+    try {
+      setResults(await searchVersionOptions(keyword));
+    } catch (error) {
+      setAlertMessage(error.payload?.message || error.message || "버전 검색 중 오류가 발생했습니다.");
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleLeftVersionChange = async (versionName) => {
+    if (rightVersionName && compareVersionNames(versionName, rightVersionName) > 0) {
+      setAlertMessage("현재 버전은 업데이트 버전보다 최신일 수 없습니다.");
+      return;
+    }
+
+    setSelectingVersionSide("left");
+    try {
+      const loadedVersions = await ensureVersionLoaded(versionName);
+      if (!loadedVersions.some((version) => version.versionName === versionName)) {
+        setAlertMessage("선택한 버전을 전체 목록에서 불러오지 못했습니다.");
+        return;
+      }
+      setLeftVersionName(versionName);
+    } catch (error) {
+      setAlertMessage(error.payload?.message || error.message || "선택한 버전을 불러오는 중 오류가 발생했습니다.");
+    } finally {
+      setSelectingVersionSide("");
+    }
+  };
+
+  const handleRightVersionChange = async (versionName) => {
+    if (leftVersionName && compareVersionNames(versionName, leftVersionName) < 0) {
+      setAlertMessage("업데이트 버전은 현재 버전보다 이전일 수 없습니다.");
+      return;
+    }
+
+    setSelectingVersionSide("right");
+    try {
+      const loadedVersions = await ensureVersionLoaded(versionName);
+      if (!loadedVersions.some((version) => version.versionName === versionName)) {
+        setAlertMessage("선택한 버전을 전체 목록에서 불러오지 못했습니다.");
+        return;
+      }
+      setRightVersionName(versionName);
+      setSelectedVersionName(versionName);
+    } catch (error) {
+      setAlertMessage(error.payload?.message || error.message || "선택한 버전을 불러오는 중 오류가 발생했습니다.");
+    } finally {
+      setSelectingVersionSide("");
+    }
+  };
+
+  const blockingSubVersionCodes = eligibility?.blockingSubVersionCodes || [];
+  const selectionBlocked = eligibility?.eligible === false;
+  const packagingDisabled = packagingStarted
+    || selectedItems.length === 0
+    || versionRangeInvalid
+    || eligibilityChecking
+    || selectionBlocked
+    || !!eligibilityError;
 
   // [개선/최적화] 폴링 시 컴포넌트 언마운트로 인한 메모리 누수 방지 및 타이머 관리를 위한 Ref 추가
   const pollTimerRef = useRef(null);
@@ -366,6 +495,12 @@ export const DeploymentPipelineDashboardSection = ({
   const { leftSequence, rightSequence } = useMemo(() => {
     // 버전 목록이 비어있으면 빈 배열을 반환합니다.
     if (!versions.length) return { leftSequence: [], rightSequence: [] };
+    if (!leftVersionName || !rightVersionName) {
+      return {
+        leftSequence: [],
+        rightSequence: rightVersionName ? [rightVersionName] : [],
+      };
+    }
     
     // 선택된 좌/우 버전의 인덱스를 찾습니다.
     const leftIdx = versions.findIndex(v => v.versionName === leftVersionName);
@@ -373,6 +508,7 @@ export const DeploymentPipelineDashboardSection = ({
     
     // 어느 하나라도 목록에 없으면 선택된 것만 반환합니다.
     if (leftIdx === -1 || rightIdx === -1) return { leftSequence: [leftVersionName], rightSequence: [rightVersionName] };
+    if (rightIdx > leftIdx) return { leftSequence: [], rightSequence: [rightVersionName] };
     
     // 우측 영역에는 하나의 버전만 표시합니다.
     const rSeq = [versions[rightIdx].versionName];
@@ -392,48 +528,36 @@ export const DeploymentPipelineDashboardSection = ({
     return { leftSequence: lSeq, rightSequence: rSeq };
   }, [versions, leftVersionName, rightVersionName]); // 의존성 배열에 관련 상태 포함
 
-      useEffect(() => {
-        setLeftVisibleCount(5);
-        if (leftScrollRef.current) {
-          leftScrollRef.current.scrollTop = 0;
-        }
-      }, [leftSequence]);
-      
-      let scrollTimeout = null;
-    const handleLeftScroll = (e) => {
-      const { scrollTop, clientHeight, scrollHeight } = e.target;
-      if (scrollHeight - scrollTop <= clientHeight + 100) {
-        if (!scrollTimeout) {
-          scrollTimeout = setTimeout(() => {
-            setLeftVisibleCount(prev => (prev < leftSequence.length ? prev + 5 : prev));
-            scrollTimeout = null;
-          }, 150);
-        }
-      }
-    };
-
   // 부모로부터 받은 versions가 업데이트될 때 선택된 버전들이 유효한지 검증하는 사이드 이펙트입니다.
   useEffect(() => {
     if (versions && versions.length > 0) {
       // 우측 버전이 목록에 없는 경우 첫 번째 버전으로 재설정합니다.
-      if (!versions.find(v => v.versionName === rightVersionName)) {
-        const newRight = versions[0].versionName;
-        setRightVersionName(newRight);
-        if (setSelectedVersionName) setSelectedVersionName(newRight);
+      if (rightVersionName && !versions.find(v => v.versionName === rightVersionName)) {
+        setRightVersionName("");
+        if (setSelectedVersionName) setSelectedVersionName("");
       }
       // 좌측 버전이 목록에 없는 경우 적절한 인덱스의 버전으로 재설정합니다.
-      if (!versions.find(v => v.versionName === leftVersionName)) {
-        const newLeft = versions.length > 1 ? versions[1].versionName : versions[0].versionName;
-        setLeftVersionName(newLeft);
+      if (leftVersionName && !versions.find(v => v.versionName === leftVersionName)) {
+        setLeftVersionName("");
       }
     }
   }, [versions, rightVersionName, leftVersionName, setSelectedVersionName]);
+
+  useEffect(() => {
+    setLeftPage(0);
+  }, [leftVersionName, rightVersionName]);
+
+  useEffect(() => {
+    setLeftPage(prev => Math.min(prev, Math.max(leftSequence.length - 1, 0)));
+  }, [leftSequence.length]);
+
+  const currentLeftVersion = leftSequence[leftPage] || "";
 
   // [개선/최적화] 이전 코드에서는 detailsCache 자체를 의존성에 두고 있어 무한 루프의 위험이 있었습니다.
   // 상태 업데이트 시 함수형 업데이트(functional update)를 사용하여 의존성 배열에서 detailsCache를 제거하고 성능과 안정성을 높였습니다.
       useEffect(() => {
     const fetchDetails = async () => {
-      const needed = [...new Set([...leftSequence.slice(0, leftVisibleCount), ...rightSequence])].filter(Boolean);
+      const needed = [...new Set([currentLeftVersion, ...rightSequence])].filter(Boolean);
       
       const toFetch = needed.filter(v => detailsCache[v] === undefined && !fetchingRef.current.has(v));
       if (toFetch.length === 0) return;
@@ -458,37 +582,60 @@ export const DeploymentPipelineDashboardSection = ({
       }
     };
     fetchDetails();
-  }, [leftSequence, rightSequence, leftVisibleCount]); // detailsCache 의존성 제거 완료
+  }, [currentLeftVersion, rightSequence]); // detailsCache 의존성 제거 완료
 
   // 우측(배포 대상) 버전이 변경될 때마다 해당 버전의 패키징 자격 및 현재 Job 상태를 확인합니다.
   useEffect(() => {
+    let cancelled = false;
     const checkRightVersionStatus = async () => {
       // 1. 패키징 가능 여부(Eligibility) 확인
+      setEligibilityChecking(true);
+      setEligibility(null);
       try {
         const elig = await getPackagingEligibility(rightVersionName);
-        setEligibility(elig);
-        setEligibilityError(""); // 에러 초기화
+        if (!cancelled) {
+          setEligibility(elig);
+          setEligibilityError(""); // 에러 초기화
+        }
       } catch (err) {
-        setEligibility(null);
-        // 에러 메시지 추출
-        setEligibilityError(err.payload?.message || err.message || "패키징 가능 여부를 확인하는 중 오류가 발생했습니다.");
+        if (!cancelled) {
+          setEligibility(null);
+          // 에러 메시지 추출
+          setEligibilityError(err.payload?.message || err.message || "패키징 가능 여부를 확인하는 중 오류가 발생했습니다.");
+        }
+      } finally {
+        if (!cancelled) setEligibilityChecking(false);
       }
       // 2. 진행 중이거나 완료된 패키지 Job 조회
       try {
         const j = await getPackageJob(rightVersionName);
-        setJobDetail(j); // Job 상태 업데이트
+        if (!cancelled) setJobDetail(j); // Job 상태 업데이트
       } catch {
-        setJobDetail(null); // 에러 발생 시 Job 정보 없음 처리
+        if (!cancelled) setJobDetail(null); // 에러 발생 시 Job 정보 없음 처리
       }
     };
     // 우측 버전이 유효하면 확인 시작
     if (rightVersionName) {
       checkRightVersionStatus();
+    } else {
+      setEligibility(null);
+      setEligibilityChecking(false);
+      setJobDetail(null);
     }
+    return () => { cancelled = true; };
   }, [rightVersionName]); // 우측 버전이 변경될 때만 실행
+
+  useEffect(() => {
+    setSelectedItems([]);
+  }, [rightVersionName]);
+
+  useEffect(() => {
+    if (selectionBlocked) setSelectedItems([]);
+  }, [selectionBlocked]);
 
   // 개별 서브버전 아이템을 장바구니에 추가/제거(토글)하는 함수입니다.
   const toggleItem = (item) => {
+    if (selectionBlocked || !item.imageTags) return;
     setSelectedItems(prev => {
       // 기존 배열에 동일한 아이템이 있는지 검사합니다.
       const exists = prev.some(i => i.code === item.code && i.versionName === item.versionName);
@@ -504,6 +651,8 @@ export const DeploymentPipelineDashboardSection = ({
 
   // 특정 버전에 속한 모든 서브버전을 한 번에 장바구니에 넣거나 빼는 전체 선택 함수입니다.
   const toggleAllItems = (vName, rows) => {
+    if (selectionBlocked) return;
+    const packageableRows = rows.filter(row => row.imageTags);
     setSelectedItems(prev => {
       // 현재 장바구니에서 해당 버전에 속한 항목들만 추려냅니다.
       const currentSelectedForVersion = prev.filter(i => i.versionName === vName);
@@ -511,12 +660,12 @@ export const DeploymentPipelineDashboardSection = ({
       const newSelected = prev.filter(i => i.versionName !== vName);
       
       // 만약 해당 버전의 모든 행(row)이 이미 선택되어 있다면
-      if (currentSelectedForVersion.length === rows.length) {
+      if (packageableRows.length > 0 && currentSelectedForVersion.length === packageableRows.length) {
         // 전부 선택 해제 처리합니다.
         return newSelected;
       } else {
         // 그렇지 않다면, 버전명 속성을 부여하여 전부 선택 상태로 만들어 추가합니다.
-        const itemsToAdd = rows.map(row => ({ ...row, versionName: vName }));
+        const itemsToAdd = packageableRows.map(row => ({ ...row, versionName: vName }));
         return [...newSelected, ...itemsToAdd];
       }
     });
@@ -574,6 +723,10 @@ export const DeploymentPipelineDashboardSection = ({
   // [최적화] 비동기 즉시 실행 함수(IIFE) 패턴을 제거하고, 함수 자체를 async/await로 수정하여 가독성을 높였습니다.
   // 사용자가 선택한 항목들을 패키징해달라고 백엔드에 요청하는 핵심 핸들러입니다.
   const handleStartPackaging = async () => {
+    if (eligibilityChecking || !eligibility) {
+      setAlertMessage("패키징 가능 여부를 확인한 후 다시 시도해주세요.");
+      return;
+    }
     // 장바구니가 비어있는지 확인합니다.
     if (selectedItems.length === 0) {
       setAlertMessage("패키징할 신규 변경사항을 장바구니에 담아주세요 (오른쪽 패널에서 체크).");
@@ -665,6 +818,28 @@ export const DeploymentPipelineDashboardSection = ({
   // 최상위 JSX 구조 렌더링 영역입니다.
   return (
     <div className="flex flex-col w-full bg-slate-100 p-4 gap-6">
+      <div className="flex flex-wrap items-center justify-end gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <span className="text-sm font-bold text-slate-600">
+          {loadingVersions
+            ? "버전 목록을 불러오는 중입니다."
+            : `버전 ${versions.length} / ${totalVersionCount}개 불러옴`}
+        </span>
+        {hasMore && (
+          <button
+            type="button"
+            onClick={loadMoreVersions}
+            disabled={loadingMoreVersions}
+            className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-extrabold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loadingMoreVersions ? "불러오는 중..." : "버전 더 불러오기"}
+          </button>
+        )}
+      </div>
+      {versionRangeInvalid && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
+          업데이트 버전은 현재 버전과 같거나 더 최신이어야 합니다.
+        </div>
+      )}
       
       {/* 메인 좌우 분할 영역 (이전 버전 비교 및 최신 버전 선택) */}
       <div className="w-full flex flex-col xl:flex-row gap-6">
@@ -681,44 +856,73 @@ export const DeploymentPipelineDashboardSection = ({
               {/* 좌측 검색 입력창 */}
               <input 
                 type="text" 
-                placeholder="버전 검색..." 
+                placeholder={leftSearchLoading ? "서버 검색 중..." : "전체 버전 검색 후 Enter"}
                 value={leftSearch}
                 onChange={(e) => setLeftSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && reloadVersions && reloadVersions(leftSearch)}
+                onKeyDown={(e) => e.key === "Enter" && handleVersionSearch("left")}
+                disabled={leftSearchLoading}
                 className="flex-1 min-w-[180px] appearance-none rounded-lg border border-slate-300 bg-white py-2 px-3 text-base font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-shadow"
               />
               {/* 좌측 버전 선택 드롭다운 */}
               <select
                 value={leftVersionName}
-                onChange={(e) => setLeftVersionName(e.target.value)}
+                onChange={(e) => handleLeftVersionChange(e.target.value)}
+                disabled={selectingVersionSide === "left"}
                 className="flex-[2] min-w-[200px] appearance-none rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-8 text-base font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-shadow cursor-pointer"
               >
-                {(versions.some(v => v.versionName === leftVersionName) ? versions : [{ versionName: leftVersionName }, ...versions]).map(v => (
-                  <option key={v.versionName} value={v.versionName}>{v.versionName}</option>
-                ))}
+                <option value="" disabled>버전을 선택하세요</option>
+                {leftVersionOptions.length === 0 && <option value="" disabled>검색 결과가 없습니다</option>}
+                {leftVersionOptions.map(v => {
+                  const disabled = !!rightVersionName && compareVersionNames(v.versionName, rightVersionName) > 0;
+                  return (
+                    <option key={v.versionName} value={v.versionName} disabled={disabled}>
+                      {v.versionName}{disabled ? " (업데이트 버전보다 최신)" : ""}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
+
+          {leftSequence.length > 0 && (
+            <div className="px-4 py-2.5 border-b border-slate-200 bg-white flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => setLeftPage(page => Math.max(page - 1, 0))}
+                disabled={leftPage === 0}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                이전 버전
+              </button>
+              <div className="text-center min-w-0">
+                <div className="text-sm font-extrabold text-[#000666] truncate">{currentLeftVersion}</div>
+                <div className="text-xs font-bold text-slate-500">{leftPage + 1} / {leftSequence.length}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLeftPage(page => Math.min(page + 1, leftSequence.length - 1))}
+                disabled={leftPage >= leftSequence.length - 1}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 text-sm font-bold text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                다음 버전
+              </button>
+            </div>
+          )}
           
           {/* 하단 버전 목록 리스트 렌더링 영역 */}
-          <div ref={leftScrollRef} onScroll={handleLeftScroll} className="flex-1 flex flex-col bg-slate-100 overflow-y-auto">
-            {leftSequence.length > 0 ? (
-              <>
-                {leftSequence.slice(0, leftVisibleCount).map(vName => (
-              // 반복해서 과거 버전 테이블을 그립니다 (읽기 전용).
+          <div className="flex-1 flex flex-col bg-slate-100 overflow-y-auto">
+            {currentLeftVersion ? (
               <ManifestTable 
-                key={`left-${vName}`}
-                versionName={vName}
-                detail={detailsCache[vName] === "loading" ? undefined : detailsCache[vName]}
+                key={`left-${currentLeftVersion}`}
+                versionName={currentLeftVersion}
+                detail={detailsCache[currentLeftVersion] === "loading" ? undefined : detailsCache[currentLeftVersion]}
                 selectable={false}
               />
-            ))}
-                
-              </>
             ) : (
-                // 표시할 버전이 없을 때의 UI
               <div className="flex items-center justify-center p-12 text-base font-bold text-slate-400">
-                선택한 범위에 해당하는 이전 버전이 없습니다.
+                {!leftVersionName || !rightVersionName
+                  ? "왼쪽과 오른쪽에서 비교할 버전을 선택해주세요."
+                  : "선택한 범위에 해당하는 이전 버전이 없습니다."}
               </div>
             )}
           </div>
@@ -738,24 +942,47 @@ export const DeploymentPipelineDashboardSection = ({
               {/* 우측 검색 입력창 */}
               <input 
                 type="text" 
-                placeholder="버전 검색..." 
+                placeholder={rightSearchLoading ? "서버 검색 중..." : "전체 버전 검색 후 Enter"}
                 value={rightSearch}
                 onChange={(e) => setRightSearch(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && reloadVersions && reloadVersions(rightSearch)}
+                onKeyDown={(e) => e.key === "Enter" && handleVersionSearch("right")}
+                disabled={rightSearchLoading}
                 className="flex-1 min-w-[180px] appearance-none rounded-lg border border-indigo-200 bg-white py-2 px-3 text-base font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-shadow"
               />
               {/* 우측 버전 선택 드롭다운 */}
               <select
                 value={rightVersionName}
-                onChange={(e) => { setRightVersionName(e.target.value); setSelectedVersionName(e.target.value); }}
+                onChange={(e) => handleRightVersionChange(e.target.value)}
+                disabled={selectingVersionSide === "right"}
                 className="flex-[2] min-w-[200px] appearance-none rounded-lg border border-indigo-200 bg-white py-2 pl-3 pr-8 text-base font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-shadow cursor-pointer"
               >
-                {(versions.some(v => v.versionName === rightVersionName) ? versions : [{ versionName: rightVersionName }, ...versions]).map(v => (
-                  <option key={v.versionName} value={v.versionName}>{v.versionName}</option>
-                ))}
+                <option value="" disabled>버전을 선택하세요</option>
+                {rightVersionOptions.length === 0 && <option value="" disabled>검색 결과가 없습니다</option>}
+                {rightVersionOptions.map(v => {
+                  const disabled = !!leftVersionName && compareVersionNames(v.versionName, leftVersionName) < 0;
+                  return (
+                    <option key={v.versionName} value={v.versionName} disabled={disabled}>
+                      {v.versionName}{disabled ? " (현재 버전보다 이전)" : ""}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
+
+          {rightVersionName && (eligibilityChecking || selectionBlocked || eligibilityError) && (
+            <div className={`mx-4 mt-4 rounded-lg border px-4 py-3 text-sm font-bold ${
+              selectionBlocked || eligibilityError
+                ? "border-amber-200 bg-amber-50 text-amber-800"
+                : "border-slate-200 bg-slate-50 text-slate-600"
+            }`}>
+              {eligibilityChecking
+                ? "패키징 가능 여부를 확인하고 있습니다."
+                : selectionBlocked
+                  ? `PENDING 항목이 있어 패키징할 수 없습니다: ${blockingSubVersionCodes.map(code => code.toUpperCase()).join(", ")}`
+                  : eligibilityError}
+            </div>
+          )}
           
           {/* 하단 버전 상세 정보 및 선택 가능한 테이블 영역 */}
           <div className="flex-1 flex flex-col bg-white overflow-y-auto">
@@ -769,6 +996,7 @@ export const DeploymentPipelineDashboardSection = ({
                 selectedItems={selectedItems}
                 toggleItem={toggleItem}
                 toggleAllItems={toggleAllItems}
+                selectionDisabled={versionRangeInvalid || eligibilityChecking || selectionBlocked || !!eligibilityError}
               />
             ))}
           </div>
@@ -900,9 +1128,9 @@ export const DeploymentPipelineDashboardSection = ({
           {/* 패키징 시작 메인 액션 버튼 */}
           <button
             onClick={handleStartPackaging}
-            disabled={packagingStarted || selectedItems.length === 0}
+            disabled={packagingDisabled}
             className={`w-full py-3 rounded-xl flex items-center justify-center gap-2 shadow-md transition-all duration-200 shrink-0 ${
-              packagingStarted || selectedItems.length === 0
+              packagingDisabled
                 ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200" 
                 : "bg-[#000666] text-white hover:bg-[#090d82] active:scale-[0.98] active:shadow-sm"
             }`}
@@ -915,7 +1143,13 @@ export const DeploymentPipelineDashboardSection = ({
           </button>
         </div>
       </section>
-      
+
+      <AlertModal
+        isOpen={!!alertMessage}
+        message={alertMessage}
+        type="warning"
+        onClose={() => setAlertMessage("")}
+      />
     </div>
   );
 };

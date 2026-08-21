@@ -14,6 +14,7 @@ import { listMainVersions, registryHealth, onedriveHealth } from "../services/ap
 
 // 불필요한 배열 생성을 방지하기 위한 기본 빈 배열입니다.
 const defaultVersions = [];
+const VERSION_PAGE_SIZE = 50;
 
 /**
  * 앱의 메인 레이아웃 및 상태를 관리하는 최상위 컴포넌트입니다.
@@ -31,32 +32,136 @@ export const HtmlBody = () => {
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [currentKeyword, setCurrentKeyword] = useState("");
+  const [totalVersionCount, setTotalVersionCount] = useState(0);
+  const [loadingMoreVersions, setLoadingMoreVersions] = useState(false);
   // 버전 목록 로드 중 발생한 에러 메시지를 관리합니다.
   const [versionError, setVersionError] = useState("");
 
   /**
    * 백엔드에서 메인 버전 목록을 불러오는 비동기 함수입니다.
    */
-  const loadVersions = async (keyword = "") => {
-    setLoadingVersions(true);
+  const loadVersions = async (keyword = "", requestedPage = 0, append = false) => {
+    if (append) {
+      setLoadingMoreVersions(true);
+    } else {
+      setLoadingVersions(true);
+    }
     setVersionError("");
 
     try {
-      const searchStr = typeof keyword === 'string' ? keyword : "";
-      const response = await listMainVersions(searchStr, 0, 50);
+      const searchStr = typeof keyword === "string" ? keyword : "";
+      const response = await listMainVersions(searchStr, requestedPage, VERSION_PAGE_SIZE);
       const items = response?.items || [];
-      // 버전 이름을 기준으로 최신순 정렬을 수행합니다.
-      // Server handles sorting.
-      setVersions(items);
-      // 선택된 버전이 없고 목록이 존재하면 첫 번째 버전을 기본값으로 설정합니다.
-      if (!selectedVersionName && items.length > 0) {
-        setSelectedVersionName(items[0].versionName);
-      }
+      const responsePage = Number.isFinite(Number(response?.page))
+        ? Number(response.page)
+        : requestedPage;
+      const responseSize = Number.isFinite(Number(response?.size))
+        ? Number(response.size)
+        : VERSION_PAGE_SIZE;
+      const totalCount = Number.isFinite(Number(response?.totalCount))
+        ? Number(response.totalCount)
+        : items.length;
+
+      // 서버 정렬 순서를 유지하면서 다음 페이지의 중복 버전만 제외합니다.
+      setVersions((previousVersions) => {
+        if (!append) return items;
+
+        const loadedVersionNames = new Set(previousVersions.map((version) => version.versionName));
+        const newItems = items.filter((version) => !loadedVersionNames.has(version.versionName));
+        return [...previousVersions, ...newItems];
+      });
+      setPage(responsePage);
+      setCurrentKeyword(searchStr);
+      setTotalVersionCount(totalCount);
+      setHasMore((responsePage + 1) * responseSize < totalCount);
     } catch (error) {
-      // 에러 발생 시 사용자에게 보여줄 메시지를 설정합니다.
       setVersionError(error.payload?.message || error.message || "메인버전 목록을 불러오는 중 오류가 발생했습니다.");
     } finally {
-      setLoadingVersions(false);
+      if (append) {
+        setLoadingMoreVersions(false);
+      } else {
+        setLoadingVersions(false);
+      }
+    }
+  };
+
+  const loadMoreVersions = () => {
+    if (!hasMore || loadingMoreVersions) return;
+    loadVersions(currentKeyword, page + 1, true);
+  };
+
+  const searchVersionOptions = async (keyword) => {
+    const searchStr = typeof keyword === "string" ? keyword.trim() : "";
+    if (!searchStr) return versions;
+
+    const results = [];
+    const loadedNames = new Set();
+    let requestedPage = 0;
+    let hasNextPage = true;
+
+    while (hasNextPage) {
+      const response = await listMainVersions(searchStr, requestedPage, VERSION_PAGE_SIZE);
+      const items = response?.items || [];
+      const responsePage = Number.isFinite(Number(response?.page)) ? Number(response.page) : requestedPage;
+      const responseSize = Number.isFinite(Number(response?.size)) ? Number(response.size) : VERSION_PAGE_SIZE;
+      const totalCount = Number.isFinite(Number(response?.totalCount)) ? Number(response.totalCount) : items.length;
+
+      items.forEach((version) => {
+        if (!loadedNames.has(version.versionName)) {
+          loadedNames.add(version.versionName);
+          results.push(version);
+        }
+      });
+
+      hasNextPage = items.length > 0 && (responsePage + 1) * responseSize < totalCount;
+      requestedPage = responsePage + 1;
+    }
+
+    return results;
+  };
+
+  const ensureVersionLoaded = async (versionName) => {
+    if (!versionName || versions.some((version) => version.versionName === versionName) || !hasMore) {
+      return versions;
+    }
+
+    setLoadingMoreVersions(true);
+    try {
+      let mergedVersions = [...versions];
+      let nextPage = page + 1;
+      let lastLoadedPage = page;
+      let lastPageSize = VERSION_PAGE_SIZE;
+      let serverTotalCount = totalVersionCount;
+      let targetFound = false;
+
+      while (!targetFound && (lastLoadedPage + 1) * lastPageSize < serverTotalCount) {
+        const response = await listMainVersions("", nextPage, VERSION_PAGE_SIZE);
+        const items = response?.items || [];
+        const responsePage = Number.isFinite(Number(response?.page)) ? Number(response.page) : nextPage;
+        const responseSize = Number.isFinite(Number(response?.size)) ? Number(response.size) : VERSION_PAGE_SIZE;
+        serverTotalCount = Number.isFinite(Number(response?.totalCount)) ? Number(response.totalCount) : serverTotalCount;
+
+        const loadedNames = new Set(mergedVersions.map((version) => version.versionName));
+        mergedVersions = [
+          ...mergedVersions,
+          ...items.filter((version) => !loadedNames.has(version.versionName)),
+        ];
+        targetFound = mergedVersions.some((version) => version.versionName === versionName);
+        lastLoadedPage = responsePage;
+        lastPageSize = responseSize;
+        nextPage = responsePage + 1;
+
+        if (items.length === 0) break;
+      }
+
+      setVersions(mergedVersions);
+      setPage(lastLoadedPage);
+      setCurrentKeyword("");
+      setTotalVersionCount(serverTotalCount);
+      setHasMore((lastLoadedPage + 1) * lastPageSize < serverTotalCount);
+      return mergedVersions;
+    } finally {
+      setLoadingMoreVersions(false);
     }
   };
 
@@ -196,18 +301,20 @@ export const HtmlBody = () => {
           {activeNavigation === "deployer" ? (
             <DeploymentPipelineDashboardSection 
               versions={versions}
-              selectedVersionName={selectedVersionName}
               setSelectedVersionName={setSelectedVersionName}
-              reloadVersions={loadVersions}
-              page={page}
               hasMore={hasMore}
+              totalVersionCount={totalVersionCount}
+              loadingVersions={loadingVersions}
+              loadingMoreVersions={loadingMoreVersions}
+              loadMoreVersions={loadMoreVersions}
+              searchVersionOptions={searchVersionOptions}
+              ensureVersionLoaded={ensureVersionLoaded}
             />
           ) : activeNavigation === "developer" ? (
             <DeveloperVersionRegistrationSection 
               versions={versions}
               setVersions={setVersions}
               setSelectedVersionName={setSelectedVersionName}
-              setActiveNavigation={setActiveNavigation}
             />
           ) : (
             <JobManagementPage />
