@@ -300,10 +300,27 @@ const formatErrorDetail = (detail) => {
   return String(detail);
 };
 
-const getJobErrorMessage = (error, fallback) => {
+const getJobErrorData = (error, fallback) => {
   const message = error?.payload?.message || error?.message || fallback;
   const detail = formatErrorDetail(error?.payload?.detail);
-  return detail ? `${message}\n${detail}` : message;
+  return { message, detail };
+};
+
+const getRegistryErrorItems = (detail, selectedItems) => {
+  const imageTags = Array.isArray(detail)
+    ? detail.filter((item) => typeof item === "string")
+    : [];
+
+  return imageTags.map((imageTag) => {
+    const matchingItem = selectedItems.find((item) => (item.imageTags || "")
+      .split("\n")
+      .map((tag) => tag.trim())
+      .includes(imageTag));
+    return {
+      app: matchingItem?.code || "APP 확인 필요",
+      imageTag,
+    };
+  });
 };
 
 export const DeploymentPipelineDashboardSection = ({ 
@@ -372,6 +389,8 @@ export const DeploymentPipelineDashboardSection = ({
   const [jobPolling, setJobPolling] = useState(false);
   // 패키징 진행 중 발생한 에러 메시지를 보관합니다.
   const [jobError, setJobError] = useState("");
+  const [jobErrorDetail, setJobErrorDetail] = useState("");
+  const [jobErrorItems, setJobErrorItems] = useState([]);
   // 현재 버전이 패키징 가능한 상태인지에 대한 자격 여부 정보입니다.
   const [eligibility, setEligibility] = useState(null);
   const [eligibilityChecking, setEligibilityChecking] = useState(false);
@@ -611,6 +630,8 @@ export const DeploymentPipelineDashboardSection = ({
   // 패키징 오류는 선택 당시 버전에 종속되므로 좌우 버전이 바뀌면 이전 오류를 제거합니다.
   useEffect(() => {
     setJobError("");
+    setJobErrorDetail("");
+    setJobErrorItems([]);
   }, [leftVersionName, rightVersionName]);
 
   // 자격 조회 결과 PENDING 등이 확인되면 이미 선택했던 항목도 즉시 제거합니다.
@@ -686,7 +707,10 @@ export const DeploymentPipelineDashboardSection = ({
       if (!isMountedRef.current) return; // 에러 캐치 직후에도 언마운트 확인
       
       // 에러가 발생한 경우 상태를 기록하고 폴링 종료
-      setJobError(getJobErrorMessage(err, "패키징 상태 조회 중 오류가 발생했습니다."));
+      const errorData = getJobErrorData(err, "패키징 상태 조회 중 오류가 발생했습니다.");
+      setJobError(errorData.message);
+      setJobErrorDetail(errorData.detail);
+      setJobErrorItems([]);
       setJobPolling(false);
       setPackagingStarted(false);
     }
@@ -725,6 +749,8 @@ export const DeploymentPipelineDashboardSection = ({
     setPackagingStarted(true);
     // 기존 발생했던 에러 메시지를 초기화합니다.
     setJobError("");
+    setJobErrorDetail("");
+    setJobErrorItems([]);
     
     try {
       // API에 전달할 요청 본문을 생성합니다.
@@ -740,9 +766,11 @@ export const DeploymentPipelineDashboardSection = ({
       pollJob();
     } catch (err) {
       // 에러 발생 시 UI에 에러를 표시하고 로딩 상태를 해제합니다.
-      const errorMessage = getJobErrorMessage(err, "패키지 Job 생성 중 오류가 발생했습니다.");
-      setJobError(errorMessage);
-      setAlertMessage(errorMessage);
+      const errorData = getJobErrorData(err, "패키지 Job 생성 중 오류가 발생했습니다.");
+      setJobError(errorData.message);
+      setJobErrorDetail(errorData.detail);
+      setJobErrorItems(getRegistryErrorItems(err.payload?.detail, selectedItems));
+      setAlertMessage(errorData.message);
       setPackagingStarted(false);
     }
   };
@@ -789,8 +817,27 @@ export const DeploymentPipelineDashboardSection = ({
             )}
           </div>
           {jobError && (
-            <div className="whitespace-pre-wrap break-words rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-600">
-              {jobError}
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-600">
+              <div>{jobError}</div>
+              {jobErrorItems.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {jobErrorItems.map((item, index) => (
+                    <div
+                      key={`${item.imageTag}-${index}`}
+                      className="flex min-w-0 items-center gap-2 rounded border border-red-200 bg-white px-2.5 py-1.5 shadow-sm"
+                    >
+                      <span className="shrink-0 rounded bg-red-100 px-1.5 py-0.5 text-xs font-extrabold text-red-700">
+                        {item.app}
+                      </span>
+                      <span className="break-all font-mono text-xs font-bold text-red-700">
+                        {item.imageTag}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : jobErrorDetail ? (
+                <div className="mt-2 whitespace-pre-wrap break-words font-mono text-xs">{jobErrorDetail}</div>
+              ) : null}
             </div>
           )}
         </div>
