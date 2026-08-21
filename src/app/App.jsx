@@ -14,14 +14,27 @@ import { listMainVersions, registryHealth, onedriveHealth } from "../services/ap
 
 // 불필요한 배열 생성을 방지하기 위한 기본 빈 배열입니다.
 const defaultVersions = [];
-const VERSION_PAGE_SIZE = 50;
+// 드롭다운 무한 스크롤의 한 번당 조회 단위입니다. 서버 PageResponse의 size와 동일하게 사용합니다.
+const VERSION_PAGE_SIZE = 20;
+// 새로고침 후에도 사용자가 보고 있던 모드로 복귀하기 위한 브라우저 저장 키입니다.
+const ACTIVE_NAVIGATION_STORAGE_KEY = "deployHub.activeNavigation";
+const VALID_NAVIGATIONS = new Set(["deployer", "developer", "job_management"]);
+
+const getInitialNavigation = () => {
+  try {
+    const savedNavigation = window.localStorage.getItem(ACTIVE_NAVIGATION_STORAGE_KEY);
+    return VALID_NAVIGATIONS.has(savedNavigation) ? savedNavigation : "deployer";
+  } catch {
+    return "deployer";
+  }
+};
 
 /**
  * 앱의 메인 레이아웃 및 상태를 관리하는 최상위 컴포넌트입니다.
  */
 export const HtmlBody = () => {
   // 현재 활성화된 네비게이션 모드를 관리합니다 ('deployer' 또는 'developer', 'job_management').
-  const [activeNavigation, setActiveNavigation] = useState("deployer");
+  const [activeNavigation, setActiveNavigation] = useState(getInitialNavigation);
   // 메인 버전 목록 데이터를 관리합니다.
   const [versions, setVersions] = useState(defaultVersions);
   // 현재 선택된 버전의 이름을 관리합니다.
@@ -37,8 +50,17 @@ export const HtmlBody = () => {
   // 버전 목록 로드 중 발생한 에러 메시지를 관리합니다.
   const [versionError, setVersionError] = useState("");
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(ACTIVE_NAVIGATION_STORAGE_KEY, activeNavigation);
+    } catch {
+      // 브라우저 저장소를 사용할 수 없는 환경에서는 기본 동작을 유지합니다.
+    }
+  }, [activeNavigation]);
+
   /**
-   * 백엔드에서 메인 버전 목록을 불러오는 비동기 함수입니다.
+   * 메인버전 한 페이지를 조회합니다.
+   * append=true일 때 서버 정렬 순서를 그대로 유지하며 이미 로드한 버전만 제거해 뒤에 누적합니다.
    */
   const loadVersions = async (keyword = "", requestedPage = 0, append = false) => {
     if (append) {
@@ -85,11 +107,16 @@ export const HtmlBody = () => {
     }
   };
 
+  // 드롭다운 하단 도달 시 호출됩니다. 로딩 중 중복 요청과 마지막 페이지 이후 요청을 막습니다.
   const loadMoreVersions = () => {
     if (!hasMore || loadingMoreVersions) return;
     loadVersions(currentKeyword, page + 1, true);
   };
 
+  /**
+   * 좌우 검색 결과가 전역 versions를 덮어쓰지 않도록 검색 결과만 별도로 반환합니다.
+   * 검색 결과가 여러 페이지여도 누락되지 않게 서버의 마지막 페이지까지 순회합니다.
+   */
   const searchVersionOptions = async (keyword) => {
     const searchStr = typeof keyword === "string" ? keyword.trim() : "";
     if (!searchStr) return versions;
@@ -120,6 +147,10 @@ export const HtmlBody = () => {
     return results;
   };
 
+  /**
+   * 검색 결과에서 선택한 버전이 아직 공용 목록에 없다면 해당 버전을 찾을 때까지 다음 페이지를 적재합니다.
+   * 이후 비교 범위 계산은 공용 versions의 서버 정렬 순서를 기준으로 수행할 수 있습니다.
+   */
   const ensureVersionLoaded = async (versionName) => {
     if (!versionName || versions.some((version) => version.versionName === versionName) || !hasMore) {
       return versions;
@@ -196,7 +227,7 @@ export const HtmlBody = () => {
 
   return (
     // 전체 화면 레이아웃을 구성하는 최상위 컨테이너
-    <div className="flex min-h-screen bg-[#f8fafc] font-sans">
+    <div className="flex min-h-screen bg-[#eef2f7] font-sans">
       {/* 메인 콘텐츠 영역 */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* 상단 헤더 영역 */}
@@ -223,15 +254,26 @@ export const HtmlBody = () => {
 
           <div className="flex items-center gap-6">
             {/* 모드 전환 스위처 */}
-            <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shadow-inner">
-              <button
-                onClick={() => setActiveNavigation("deployer")}
-                className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all flex items-center gap-1.5 ${
-                  activeNavigation === "deployer" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                <span>🚀</span> 배포자 모드
-              </button>
+            <div className="flex items-center gap-3">
+              <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shadow-inner">
+                <button
+                  onClick={() => setActiveNavigation("deployer")}
+                  className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all flex items-center gap-1.5 ${
+                    activeNavigation === "deployer" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  <span>🚀</span> 배포자 모드
+                </button>
+                <button
+                  onClick={() => setActiveNavigation("job_management")}
+                  className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all flex items-center gap-1.5 ${
+                    activeNavigation === "job_management" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  <span>🛠️</span> JOB 관리
+                </button>
+              </div>
+              <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shadow-inner">
               <button
                 onClick={() => setActiveNavigation("developer")}
                 className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all flex items-center gap-1.5 ${
@@ -240,14 +282,7 @@ export const HtmlBody = () => {
               >
                 <span>👨‍💻</span> 개발자 모드
               </button>
-              <button
-                onClick={() => setActiveNavigation("job_management")}
-                className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all flex items-center gap-1.5 ${
-                  activeNavigation === "job_management" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                <span>🛠️</span> Job 관리
-              </button>
+              </div>
             </div>
 
             {/* 구분선 */}
@@ -303,7 +338,6 @@ export const HtmlBody = () => {
               versions={versions}
               setSelectedVersionName={setSelectedVersionName}
               hasMore={hasMore}
-              totalVersionCount={totalVersionCount}
               loadingVersions={loadingVersions}
               loadingMoreVersions={loadingMoreVersions}
               loadMoreVersions={loadMoreVersions}
@@ -315,6 +349,10 @@ export const HtmlBody = () => {
               versions={versions}
               setVersions={setVersions}
               setSelectedVersionName={setSelectedVersionName}
+              hasMore={hasMore}
+              loadingVersions={loadingVersions}
+              loadingMoreVersions={loadingMoreVersions}
+              loadMoreVersions={loadMoreVersions}
             />
           ) : (
             <JobManagementPage />

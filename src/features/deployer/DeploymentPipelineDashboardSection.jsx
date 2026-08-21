@@ -1,8 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 // UI 구성요소 및 아이콘을 임포트합니다.
 import { 
-  CheckCircleIcon, 
-  CopyIcon,
   PlayIcon,
   MonitorIcon,
   ListIcon,
@@ -10,8 +8,9 @@ import {
   ShoppingCartIcon
 } from "../../components/ui/Icons";
 import { AlertModal } from "../../components/ui/AlertModal";
+import { VersionDropdown } from "../../components/ui/VersionDropdown";
 // 백엔드 API 호출을 위한 서비스 함수들을 임포트합니다.
-import { getMainVersionDetail, getPackagingEligibility, createPackageJob, getPackageJob, retryPackageJob } from "../../services/api";
+import { getMainVersionDetail, getPackagingEligibility, createPackageJob, getPackageJob } from "../../services/api";
 
 // 서브버전 항목들의 기본 정렬 순서를 정의합니다.
 import { SUBVERSION_ORDER } from '../../utils/constants';
@@ -38,53 +37,6 @@ const linkifyText = (text) => {
     // 일반 텍스트인 경우 그대로 반환합니다.
     return part;
   });
-};
-
-// [리팩토링 후보] 범용 유틸리티 함수이므로 향후 utils.js 등으로 분리하는 것을 고려할 수 있습니다.
-// 클립보드 복사 유틸리티 함수 (http 환경 등 navigator.clipboard가 없는 경우를 위한 폴백 포함)입니다.
-const copyToClipboard = async (text) => {
-  // 최신 브라우저 환경에서 navigator.clipboard API 시도
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    try {
-      // 텍스트 복사를 비동기적으로 실행합니다.
-      await navigator.clipboard.writeText(text);
-      // 성공 시 true를 반환합니다.
-      return true;
-    } catch (err) {
-      // 실패 시 경고 로그를 출력하고 폴백 로직으로 이동합니다.
-      console.warn("Clipboard API failed, trying fallback...", err);
-    }
-  }
-  
-  // Fallback: document.execCommand('copy') 사용
-  try {
-    // 임시 텍스트 영역(textarea) 요소를 생성합니다.
-    const textArea = document.createElement("textarea");
-    // 복사할 텍스트를 요소에 할당합니다.
-    textArea.value = text;
-    // fixed로 설정하여 화면 스크롤 이동을 방지합니다.
-    textArea.style.position = "fixed"; 
-    // 화면 밖으로 숨김 처리합니다.
-    textArea.style.left = "-999999px";
-    textArea.style.top = "-999999px";
-    // body에 임시 요소를 추가합니다.
-    document.body.appendChild(textArea);
-    // 요소에 포커스를 맞춥니다.
-    textArea.focus();
-    // 텍스트를 선택합니다.
-    textArea.select();
-    
-    // 복사 명령어를 실행하여 텍스트를 클립보드에 담습니다.
-    const successful = document.execCommand('copy');
-    // 임시 요소를 화면에서 제거합니다.
-    textArea.remove();
-    // 복사 성공 여부를 반환합니다.
-    return successful;
-  } catch (err) {
-    // 폴백 에러 발생 시 로그를 출력하고 false를 반환합니다.
-    console.error("Fallback clipboard copy failed", err);
-    return false;
-  }
 };
 
 // [리팩토링 후보] 내부에서만 사용되므로 여기에 두었으나, 향후 Icons.jsx로 이동할 수 있는 로컬 SVG 아이콘 컴포넌트입니다.
@@ -150,8 +102,8 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
       
       // 업데이트가 발생한 상태인 경우
       if (statusValue === "UPDATED" || statusValue === "UPDATE") {
-        // 상태 텍스트를 UPDATE로 설정합니다.
-        statusText = "UPDATE";
+        // 상태 텍스트를 UPDATED로 설정합니다.
+        statusText = "UPDATED";
         // 상태 스타일을 파란색 톤으로 변경합니다.
         statusClass = "bg-indigo-100 text-indigo-700 font-bold border border-indigo-200";
       } else if (statusValue === "PENDING") { 
@@ -186,34 +138,34 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
   return (
     <div className="flex flex-col w-full bg-white border-b-4 border-slate-300">
       {/* 상단: 버전 정보 및 SQL/Release Note 요약 영역 */}
-      <div className="px-3 py-2.5 bg-slate-100 border-b border-slate-200 flex flex-col gap-2 shadow-sm">
+      <div className="h-[154px] shrink-0 px-3 py-2.5 bg-slate-100 border-b border-slate-200 flex flex-col gap-2 shadow-sm overflow-hidden">
         <div className="flex items-center justify-between">
           {/* 해당 테이블의 기준 버전명 표시 */}
-          <span className="font-extrabold text-slate-800 text-base">버전: {versionName}</span>
+          <span className="font-extrabold text-slate-800 text-base">VERSION: {versionName}</span>
         </div>
         {/* SQL 및 릴리즈 노트를 2단 컬럼으로 배치 */}
-        <div className="grid grid-cols-2 gap-4 mt-1 bg-white p-2 rounded border border-slate-200">
-          <div className="flex flex-col">
+        <div className="grid grid-cols-2 gap-4 mt-1 bg-white p-2 rounded border border-slate-200 flex-1 min-h-0">
+          <div className="flex flex-col min-w-0 min-h-0">
             <span className="text-xs font-bold text-slate-500 uppercase mb-1">SQL Script</span>
             {/* SQL 스크립트 텍스트 렌더링 */}
-            <span className="text-[13px] text-slate-700 whitespace-pre-wrap break-words">{detail?.mainVersion?.sqlScript || "-"}</span>
+            <span className="text-[13px] text-slate-700 whitespace-pre-wrap break-words overflow-y-auto">{detail?.mainVersion?.sqlScript || "-"}</span>
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col min-w-0 min-h-0">
             <span className="text-xs font-bold text-slate-500 uppercase mb-1">Release Note</span>
             {/* 릴리즈 노트 텍스트 렌더링 */}
-            <span className="text-[13px] text-slate-700 whitespace-pre-wrap break-words">{detail?.mainVersion?.releaseNote || "-"}</span>
+            <span className="text-[13px] text-slate-700 whitespace-pre-wrap break-words overflow-y-auto">{detail?.mainVersion?.releaseNote || "-"}</span>
           </div>
         </div>
       </div>
       {/* 하단: 서브버전 목록 테이블 영역 */}
-      <div className="w-full">
-        <table className="w-full text-left border-collapse table-fixed">
+      <div className="w-full overflow-x-auto">
+        <table className="w-full min-w-[760px] text-left border-collapse table-fixed">
           {/* 테이블 헤더 정의 */}
           <thead className="bg-slate-50 border-b border-slate-200">
-            <tr>
-              {/* 선택 가능 모드일 경우 체크박스 및 전체선택 버튼 헤더를 렌더링 */}
-              {selectable && (
-                <th className="px-1 py-2 w-14 text-center align-middle">
+            <tr className="h-[60px]">
+              {/* 좌우 열 위치를 맞추기 위해 선택 열은 양쪽 모두 동일한 폭으로 유지합니다. */}
+              <th className="px-1 py-2 w-14 text-center align-middle">
+                {selectable ? (
                   <div className="flex flex-col items-center gap-1">
                     <span className="text-xs font-extrabold text-slate-600 leading-none">선택</span>
                     {/* 전체 항목을 토글하는 버튼 */}
@@ -226,8 +178,10 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
                       전체선택
                     </button>
                   </div>
-                </th>
-              )}
+                ) : (
+                  <span className="text-xs font-extrabold text-slate-400">비교</span>
+                )}
+              </th>
               {/* 컬럼명 정의 */}
               <th className="px-2 py-3 w-[12%] text-sm font-extrabold text-slate-600 uppercase tracking-wider">APP</th>
               <th className="px-2 py-3 w-[14%] text-sm font-extrabold text-slate-600 uppercase tracking-wider">VERSION</th>
@@ -245,11 +199,10 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
               const rowSelectionDisabled = selectionDisabled || !row.imageTags;
               
               return (
-                <tr key={row.key} className={`transition-colors ${row.highlighted ? "bg-indigo-50/20" : "hover:bg-slate-50"}`}>
-                  {/* 체크박스 셀 렌더링 (선택 모드일 때만) */}
-                  {selectable && (
-                    <td className="px-2 py-3 text-center align-middle">
-                      {/* 항목을 선택/해제하는 토글 버튼 */}
+                <tr key={row.key} className={`h-[96px] transition-colors ${row.highlighted ? "bg-indigo-50/20" : "hover:bg-slate-50"}`}>
+                  {/* 선택 가능 여부와 관계없이 같은 폭의 첫 번째 열을 유지합니다. */}
+                  <td className="px-2 py-3 text-center align-middle">
+                    {selectable ? (
                       <button
                         type="button"
                         onClick={() => toggleItem({ ...row, versionName })}
@@ -265,19 +218,21 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
                         {/* 선택 시 체크 아이콘 표시 */}
                         {isSelected && <CheckIcon className="w-4 h-4 text-white" />}
                       </button>
-                    </td>
-                  )}
+                    ) : (
+                      <span className="text-slate-300">—</span>
+                    )}
+                  </td>
                   {/* APP(코드) 셀 */}
-                  <td className="px-2 py-3 text-sm font-extrabold text-slate-800 align-top">
+                  <td className="h-[96px] px-2 py-3 text-sm font-extrabold text-slate-800 align-top overflow-hidden">
                     {row.code}
                   </td>
                   {/* VERSION 셀 */}
-                  <td className="px-2 py-3 text-sm font-bold text-slate-700 align-top break-all">
-                    {row.tag}
+                  <td className="h-[96px] px-2 py-3 text-sm font-bold text-slate-700 align-top break-all overflow-hidden">
+                    <div className="max-h-[72px] overflow-y-auto">{row.tag}</div>
                   </td>
                   {/* IMAGE TAG 셀 */}
-                  <td className="px-2 py-3 align-top break-all">
-                    <div className="flex flex-col gap-1">
+                  <td className="h-[96px] px-2 py-3 align-top break-all overflow-hidden">
+                    <div className="flex max-h-[72px] flex-col gap-1 overflow-y-auto">
                       {/* 줄바꿈 단위로 이미지 태그들을 분리하여 렌더링 */}
                       {row.imageTags ? row.imageTags.split('\n').map((line, i) => (
                         <span key={i} className="text-[13px] font-bold text-slate-800 font-mono leading-tight">{line}</span>
@@ -285,8 +240,8 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
                     </div>
                   </td>
                   {/* NOTE 셀 */}
-                  <td className="px-2 py-3 align-top break-keep text-justify">
-                    <div className="flex flex-col gap-1.5">
+                  <td className="h-[96px] px-2 py-3 align-top break-keep text-justify overflow-hidden">
+                    <div className="flex max-h-[72px] flex-col gap-1.5 overflow-y-auto">
                       {/* 노트를 줄바꿈 기준으로 나누고, 내부의 URL은 링크화하여 렌더링 */}
                       {row.note.split('\n').map((line, i) => (
                         <span key={i} className="text-[14px] font-medium text-slate-800 leading-relaxed break-words">{linkifyText(line)}</span>
@@ -294,7 +249,7 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
                     </div>
                   </td>
                   {/* STATUS 셀 */}
-                  <td className="px-2 py-3 align-top">
+                  <td className="h-[96px] px-2 py-3 align-top overflow-hidden">
                     <span className={`inline-block px-2.5 py-1.5 rounded text-xs tracking-wide whitespace-nowrap shadow-sm ${row.statusClass}`}>
                       {/* 현재 상태 텍스트 렌더링 */}
                       {row.statusText}
@@ -313,6 +268,10 @@ const ManifestTable = ({ versionName, detail, selectable, selectedItems, toggleI
 // ==========================================
 // [Main Component] 배포자(Deployer) 대시보드 메인 컴포넌트
 // ==========================================
+/**
+ * YYYY.MM.DD와 YYYY.MM.DD-N을 숫자 단위로 비교합니다.
+ * 형식이 다른 레거시 값은 numeric localeCompare로 폴백해 화면이 중단되지 않게 합니다.
+ */
 const compareVersionNames = (leftName, rightName) => {
   const parseVersionName = (versionName) => {
     const match = /^(\d{4})\.(\d{2})\.(\d{2})(?:-(\d+))?$/.exec(versionName || "");
@@ -334,7 +293,6 @@ export const DeploymentPipelineDashboardSection = ({
   versions, 
   setSelectedVersionName,
   hasMore,
-  totalVersionCount,
   loadingVersions,
   loadingMoreVersions,
   loadMoreVersions,
@@ -391,8 +349,6 @@ export const DeploymentPipelineDashboardSection = ({
 
   // 패키징 작업이 시작되었는지를 나타내는 상태입니다.
   const [packagingStarted, setPackagingStarted] = useState(false);
-  // URL 복사가 성공적으로 완료되었는지 알리기 위한 임시 상태입니다.
-  const [copied, setCopied] = useState(false);
   // 백엔드에서 반환된 Job(작업)의 상세 내역 상태입니다.
   const [jobDetail, setJobDetail] = useState(null);
   // Job이 완료되었는지 확인하기 위해 폴링 중인지 여부를 나타냅니다.
@@ -472,6 +428,7 @@ export const DeploymentPipelineDashboardSection = ({
 
   const blockingSubVersionCodes = eligibility?.blockingSubVersionCodes || [];
   const selectionBlocked = eligibility?.eligible === false;
+  // 패키징 버튼은 단순히 장바구니 유무만 보지 않고 범위·자격 조회·PENDING 상태를 모두 통과해야 활성화합니다.
   const packagingDisabled = packagingStarted
     || selectedItems.length === 0
     || versionRangeInvalid
@@ -491,7 +448,8 @@ export const DeploymentPipelineDashboardSection = ({
     };
   }, []);
 
-  // 선택된 기준 버전에 따라 좌/우 영역에 표시할 연관 버전 목록을 계산합니다.
+  // versions는 서버 최신순 정렬을 유지합니다. 따라서 두 인덱스 사이가 곧 비교해야 할 메인버전 범위입니다.
+  // 우측은 최종 업데이트 버전 1개, 좌측은 그 사이 이력을 버전별 페이지로 보여줍니다.
   const { leftSequence, rightSequence } = useMemo(() => {
     // 버전 목록이 비어있으면 빈 배열을 반환합니다.
     if (!versions.length) return { leftSequence: [], rightSequence: [] };
@@ -543,19 +501,21 @@ export const DeploymentPipelineDashboardSection = ({
     }
   }, [versions, rightVersionName, leftVersionName, setSelectedVersionName]);
 
+  // 비교 기준이 바뀌면 이전 범위의 페이지 번호를 재사용하지 않도록 첫 페이지로 돌아갑니다.
   useEffect(() => {
     setLeftPage(0);
   }, [leftVersionName, rightVersionName]);
 
+  // 추가 페이지 로딩 등으로 비교 범위 길이가 바뀌어도 현재 페이지가 범위를 벗어나지 않게 보정합니다.
   useEffect(() => {
     setLeftPage(prev => Math.min(prev, Math.max(leftSequence.length - 1, 0)));
   }, [leftSequence.length]);
 
   const currentLeftVersion = leftSequence[leftPage] || "";
 
-  // [개선/최적화] 이전 코드에서는 detailsCache 자체를 의존성에 두고 있어 무한 루프의 위험이 있었습니다.
-  // 상태 업데이트 시 함수형 업데이트(functional update)를 사용하여 의존성 배열에서 detailsCache를 제거하고 성능과 안정성을 높였습니다.
-      useEffect(() => {
+  // 현재 좌측 페이지와 우측 버전에 필요한 상세만 지연 조회합니다.
+  // fetchingRef는 React 재렌더 사이에도 진행 중 요청을 기억해 같은 버전의 중복 조회를 막습니다.
+  useEffect(() => {
     const fetchDetails = async () => {
       const needed = [...new Set([currentLeftVersion, ...rightSequence])].filter(Boolean);
       
@@ -584,7 +544,8 @@ export const DeploymentPipelineDashboardSection = ({
     fetchDetails();
   }, [currentLeftVersion, rightSequence]); // detailsCache 의존성 제거 완료
 
-  // 우측(배포 대상) 버전이 변경될 때마다 해당 버전의 패키징 자격 및 현재 Job 상태를 확인합니다.
+  // 우측 버전은 실제 패키징 대상이므로 선택 즉시 자격(PENDING 포함)과 기존 JOB을 함께 확인합니다.
+  // cancelled 가드는 빠르게 버전을 바꿨을 때 이전 응답이 최신 선택 상태를 덮어쓰는 경쟁 조건을 막습니다.
   useEffect(() => {
     let cancelled = false;
     const checkRightVersionStatus = async () => {
@@ -625,10 +586,12 @@ export const DeploymentPipelineDashboardSection = ({
     return () => { cancelled = true; };
   }, [rightVersionName]); // 우측 버전이 변경될 때만 실행
 
+  // 다른 업데이트 버전의 항목이 섞여 패키징되지 않도록 대상 버전 변경 시 장바구니를 비웁니다.
   useEffect(() => {
     setSelectedItems([]);
   }, [rightVersionName]);
 
+  // 자격 조회 결과 PENDING 등이 확인되면 이미 선택했던 항목도 즉시 제거합니다.
   useEffect(() => {
     if (selectionBlocked) setSelectedItems([]);
   }, [selectionBlocked]);
@@ -649,7 +612,7 @@ export const DeploymentPipelineDashboardSection = ({
     });
   };
 
-  // 특정 버전에 속한 모든 서브버전을 한 번에 장바구니에 넣거나 빼는 전체 선택 함수입니다.
+  // 전체 선택에서도 IMAGE TAG가 없는 EXT 등의 행은 API 요청 대상에 포함하지 않습니다.
   const toggleAllItems = (vName, rows) => {
     if (selectionBlocked) return;
     const packageableRows = rows.filter(row => row.imageTags);
@@ -670,19 +633,6 @@ export const DeploymentPipelineDashboardSection = ({
       }
     });
   };
-
-  // 배포 성공 시 반환되는 URL 목록을 렌더링하기 쉽게 포맷팅하는 메모이제이션 데이터입니다.
-  const deploymentUrls = useMemo(() => {
-    // 항목 배열이 없거나 유효하지 않으면 빈 배열 반환
-    if (!jobDetail?.items || !Array.isArray(jobDetail.items)) return [];
-    // fileUrl이 존재하는 항목만 추출하여 매핑합니다.
-    return jobDetail.items
-      .filter(item => item.fileUrl)
-      .map(item => ({
-        imageTag: item.imageTag,
-        fileUrl: item.fileUrl,
-      }));
-  }, [jobDetail]); // jobDetail이 변경될 때만 재계산
 
   // [개선/최적화] 이전 코드의 재귀적 setTimeout 호출 시, 컴포넌트 언마운트 시 상태 변경을 시도하는 메모리 누수가 발생할 수 있었습니다.
   // 추가된 마운트 상태(isMountedRef)를 확인하고, 진행 중인 타이머를(pollTimerRef) 해제할 수 있도록 최적화했습니다.
@@ -720,8 +670,8 @@ export const DeploymentPipelineDashboardSection = ({
     }
   }, [rightVersionName]); // 우측 버전에 의존성을 가집니다.
 
-  // [최적화] 비동기 즉시 실행 함수(IIFE) 패턴을 제거하고, 함수 자체를 async/await로 수정하여 가독성을 높였습니다.
-  // 사용자가 선택한 항목들을 패키징해달라고 백엔드에 요청하는 핵심 핸들러입니다.
+  // 모든 화면 가드를 다시 확인한 뒤 선택된 IMAGE TAG만 JOB 생성 API로 전송합니다.
+  // 버튼 disabled만 신뢰하지 않고 핸들러에서도 검증해 키보드/비동기 상태 변화에 대비합니다.
   const handleStartPackaging = async () => {
     if (eligibilityChecking || !eligibility) {
       setAlertMessage("패키징 가능 여부를 확인한 후 다시 시도해주세요.");
@@ -774,78 +724,76 @@ export const DeploymentPipelineDashboardSection = ({
     }
   };
 
-  // 실패한 패키지 작업을 재시도하는 핸들러입니다.
-  const handleRetry = async () => {
-    // 에러 상태를 초기화합니다.
-    setJobError("");
-    // 로딩 상태를 활성화합니다.
-    setPackagingStarted(true);
-    try {
-      // 재시도 API를 호출합니다 (이전에 넘긴 태그 정보를 서버가 알 수 있도록 재요청).
-      const res = await retryPackageJob(rightVersionName, { imageTags: [], force: true });
-      // 상태 업데이트 후 다시 폴링을 시작합니다.
-      setJobDetail(res || null);
-      setJobPolling(true);
-      pollJob();
-    } catch (err) {
-      // 실패 시 사용자에게 알림을 표시합니다.
-      setJobError(err.payload?.message || err.message || "재시도 요청 중 오류가 발생했습니다.");
-      setAlertMessage(err.payload?.message || err.message || "재시도 요청 중 오류가 발생했습니다.");
-      setPackagingStarted(false);
-    }
-  };
-
-  // 생성된 배포 URL 전부를 클립보드에 일괄 복사하는 기능입니다.
-  const handleCopyAll = async () => {
-    // URL 목록이 있으면 파일 URL들을 수집하고, 없으면 선택된 이미지 태그들을 수집합니다.
-    const urls = deploymentUrls.length > 0
-      ? deploymentUrls.map((r) => r.fileUrl).join("\n")
-      : selectedItems.map((r) => r.imageTags).filter(Boolean).join("\n");
-
-    if (urls) {
-      // 복사 유틸리티를 호출합니다.
-      await copyToClipboard(urls);
-      // '복사 완료' 텍스트를 보여주기 위해 상태를 토글합니다.
-      setCopied(true);
-      // 1.8초 뒤에 원래 상태로 되돌립니다.
-      window.setTimeout(() => setCopied(false), 1800);
-    } else {
-      // 복사할 대상이 없으면 알림을 띄웁니다.
-      setAlertMessage("복사할 항목이 없습니다.");
-    }
-  };
-
   // 최상위 JSX 구조 렌더링 영역입니다.
   return (
-    <div className="flex flex-col w-full bg-slate-100 p-4 gap-6">
-      <div className="flex flex-wrap items-center justify-end gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-        <span className="text-sm font-bold text-slate-600">
-          {loadingVersions
-            ? "버전 목록을 불러오는 중입니다."
-            : `버전 ${versions.length} / ${totalVersionCount}개 불러옴`}
-        </span>
-        {hasMore && (
-          <button
-            type="button"
-            onClick={loadMoreVersions}
-            disabled={loadingMoreVersions}
-            className="rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-extrabold text-indigo-700 transition-colors hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {loadingMoreVersions ? "불러오는 중..." : "버전 더 불러오기"}
-          </button>
-        )}
-      </div>
+    <div className="flex flex-col w-full bg-[#e9eef5] p-4 gap-6">
       {versionRangeInvalid && (
         <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700">
           업데이트 버전은 현재 버전과 같거나 더 최신이어야 합니다.
         </div>
       )}
+
+      {/* 패키징 장바구니와 실행 영역 */}
+      <section className="bg-white rounded-xl border border-slate-400 shadow-lg p-5 flex flex-col gap-4 xl:flex-row xl:items-stretch">
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingCartIcon className="w-5 h-5 text-slate-700" />
+              <span className="font-extrabold text-lg text-slate-800">패키징 장바구니</span>
+            </div>
+            {selectedItems.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setSelectedItems([])}
+                className="text-[11px] font-bold text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2 py-1 rounded transition-colors shadow-sm"
+              >
+                초기화
+              </button>
+            )}
+          </div>
+          <div className="min-h-[62px] max-h-[110px] overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 p-2.5">
+            {selectedItems.length === 0 ? (
+              <div className="flex h-full min-h-[40px] items-center justify-center text-sm font-bold text-slate-400">
+                오른쪽 업데이트 버전에서 패키징할 APP을 선택해주세요.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedItems.map((item) => (
+                  <span key={`${item.versionName}-${item.code}`} className="rounded border border-indigo-200 bg-indigo-100 px-2 py-1 text-xs font-extrabold text-indigo-800 shadow-sm">
+                    {item.versionName} - {item.code}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+          {jobError && (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-600">
+              {jobError}
+            </div>
+          )}
+        </div>
+        <button
+          type="button"
+          onClick={handleStartPackaging}
+          disabled={packagingDisabled}
+          className={`min-h-[88px] w-full shrink-0 rounded-xl px-8 flex items-center justify-center gap-2 shadow-md transition-all duration-200 xl:w-[280px] ${
+            packagingDisabled
+              ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200"
+              : "bg-[#000666] text-white hover:bg-[#090d82] active:scale-[0.98] active:shadow-sm"
+          }`}
+        >
+          {packagingStarted ? <ClockIcon className="w-6 h-6 animate-spin" /> : <PlayIcon className="w-6 h-6 fill-current" />}
+          <span className="text-xl font-extrabold uppercase tracking-wide">
+            {packagingStarted ? "진행중..." : "패키징 시작"}
+          </span>
+        </button>
+      </section>
       
       {/* 메인 좌우 분할 영역 (이전 버전 비교 및 최신 버전 선택) */}
       <div className="w-full flex flex-col xl:flex-row gap-6">
         
         {/* 좌측 영역: 이전 버전 기록 (버전별 매니페스트 변경 이력을 세로로 길게 표시) */}
-        <section className="flex-1 min-w-0 bg-white rounded-xl border border-slate-300 shadow-md flex flex-col h-[820px]">
+        <section className="flex-1 min-w-0 overflow-hidden bg-white rounded-xl border border-slate-400 shadow-lg flex flex-col h-[820px]">
           {/* 상단 툴바 및 필터 영역 */}
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col gap-3 sticky top-0 z-20">
             <div className="flex items-center gap-2">
@@ -864,28 +812,22 @@ export const DeploymentPipelineDashboardSection = ({
                 className="flex-1 min-w-[180px] appearance-none rounded-lg border border-slate-300 bg-white py-2 px-3 text-base font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-shadow"
               />
               {/* 좌측 버전 선택 드롭다운 */}
-              <select
+              <VersionDropdown
                 value={leftVersionName}
-                onChange={(e) => handleLeftVersionChange(e.target.value)}
+                options={leftVersionOptions}
+                onChange={handleLeftVersionChange}
                 disabled={selectingVersionSide === "left"}
-                className="flex-[2] min-w-[200px] appearance-none rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-8 text-base font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-shadow cursor-pointer"
-              >
-                <option value="" disabled>버전을 선택하세요</option>
-                {leftVersionOptions.length === 0 && <option value="" disabled>검색 결과가 없습니다</option>}
-                {leftVersionOptions.map(v => {
-                  const disabled = !!rightVersionName && compareVersionNames(v.versionName, rightVersionName) > 0;
-                  return (
-                    <option key={v.versionName} value={v.versionName} disabled={disabled}>
-                      {v.versionName}{disabled ? " (업데이트 버전보다 최신)" : ""}
-                    </option>
-                  );
-                })}
-              </select>
+                isOptionDisabled={(version) => !!rightVersionName && compareVersionNames(version.versionName, rightVersionName) > 0}
+                getOptionLabel={(version, optionDisabled) => `${version.versionName}${optionDisabled ? " (업데이트 버전보다 최신)" : ""}`}
+                hasMore={leftSearchResults === null && hasMore}
+                loading={loadingVersions || loadingMoreVersions}
+                onLoadMore={loadMoreVersions}
+              />
             </div>
           </div>
 
           {leftSequence.length > 0 && (
-            <div className="px-4 py-2.5 border-b border-slate-200 bg-white flex items-center justify-between gap-3">
+            <div className="h-[58px] shrink-0 px-4 py-2.5 border-b border-slate-200 bg-white flex items-center justify-between gap-3">
               <button
                 type="button"
                 onClick={() => setLeftPage(page => Math.max(page - 1, 0))}
@@ -910,7 +852,7 @@ export const DeploymentPipelineDashboardSection = ({
           )}
           
           {/* 하단 버전 목록 리스트 렌더링 영역 */}
-          <div className="flex-1 flex flex-col bg-slate-100 overflow-y-auto">
+          <div className="flex-1 flex flex-col bg-slate-50 overflow-y-auto">
             {currentLeftVersion ? (
               <ManifestTable 
                 key={`left-${currentLeftVersion}`}
@@ -919,19 +861,21 @@ export const DeploymentPipelineDashboardSection = ({
                 selectable={false}
               />
             ) : (
-              <div className="flex items-center justify-center p-12 text-base font-bold text-slate-400">
-                {!leftVersionName || !rightVersionName
-                  ? "왼쪽과 오른쪽에서 비교할 버전을 선택해주세요."
-                  : "선택한 범위에 해당하는 이전 버전이 없습니다."}
+              <div className="m-5 flex min-h-[180px] items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white p-12 text-base font-bold text-slate-500 shadow-sm">
+                {!leftVersionName
+                  ? "현재 버전을 선택해주세요."
+                  : !rightVersionName
+                    ? "업데이트 버전을 선택해주세요."
+                    : "비교할 이전 버전이 없습니다."}
               </div>
             )}
           </div>
         </section>
 
         {/* 우측 영역: 배포 대상 최신 버전 (패키징할 서브버전을 선택하는 단일 테이블 영역) */}
-        <section className="flex-1 min-w-0 bg-white rounded-xl border-2 border-indigo-200 shadow-lg flex flex-col h-[820px]">
+        <section className="flex-1 min-w-0 overflow-hidden bg-white rounded-xl border border-slate-400 shadow-lg flex flex-col h-[820px]">
           {/* 상단 툴바 및 필터 영역 */}
-          <div className="p-4 border-b border-indigo-100 bg-indigo-50/60 flex flex-col gap-3 sticky top-0 z-20">
+          <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col gap-3 sticky top-0 z-20">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <MonitorIcon className="w-6 h-6 text-indigo-700" />
@@ -947,46 +891,40 @@ export const DeploymentPipelineDashboardSection = ({
                 onChange={(e) => setRightSearch(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleVersionSearch("right")}
                 disabled={rightSearchLoading}
-                className="flex-1 min-w-[180px] appearance-none rounded-lg border border-indigo-200 bg-white py-2 px-3 text-base font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-shadow"
+                className="flex-1 min-w-[180px] appearance-none rounded-lg border border-slate-300 bg-white py-2 px-3 text-base font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-shadow"
               />
               {/* 우측 버전 선택 드롭다운 */}
-              <select
+              <VersionDropdown
                 value={rightVersionName}
-                onChange={(e) => handleRightVersionChange(e.target.value)}
+                options={rightVersionOptions}
+                onChange={handleRightVersionChange}
                 disabled={selectingVersionSide === "right"}
-                className="flex-[2] min-w-[200px] appearance-none rounded-lg border border-indigo-200 bg-white py-2 pl-3 pr-8 text-base font-bold text-slate-800 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-shadow cursor-pointer"
-              >
-                <option value="" disabled>버전을 선택하세요</option>
-                {rightVersionOptions.length === 0 && <option value="" disabled>검색 결과가 없습니다</option>}
-                {rightVersionOptions.map(v => {
-                  const disabled = !!leftVersionName && compareVersionNames(v.versionName, leftVersionName) < 0;
-                  return (
-                    <option key={v.versionName} value={v.versionName} disabled={disabled}>
-                      {v.versionName}{disabled ? " (현재 버전보다 이전)" : ""}
-                    </option>
-                  );
-                })}
-              </select>
+                isOptionDisabled={(version) => !!leftVersionName && compareVersionNames(version.versionName, leftVersionName) < 0}
+                getOptionLabel={(version, optionDisabled) => `${version.versionName}${optionDisabled ? " (현재 버전보다 이전)" : ""}`}
+                hasMore={rightSearchResults === null && hasMore}
+                loading={loadingVersions || loadingMoreVersions}
+                onLoadMore={loadMoreVersions}
+              />
             </div>
           </div>
 
-          {rightVersionName && (eligibilityChecking || selectionBlocked || eligibilityError) && (
-            <div className={`mx-4 mt-4 rounded-lg border px-4 py-3 text-sm font-bold ${
+          {rightVersionName && (
+            <div className={`h-[58px] shrink-0 border-b px-4 text-sm font-bold flex items-center ${
               selectionBlocked || eligibilityError
                 ? "border-amber-200 bg-amber-50 text-amber-800"
-                : "border-slate-200 bg-slate-50 text-slate-600"
+                : "border-slate-200 bg-white text-slate-600"
             }`}>
               {eligibilityChecking
                 ? "패키징 가능 여부를 확인하고 있습니다."
                 : selectionBlocked
                   ? `PENDING 항목이 있어 패키징할 수 없습니다: ${blockingSubVersionCodes.map(code => code.toUpperCase()).join(", ")}`
-                  : eligibilityError}
+                  : eligibilityError || "패키징할 APP을 선택해주세요."
+              }
             </div>
           )}
-          
           {/* 하단 버전 상세 정보 및 선택 가능한 테이블 영역 */}
-          <div className="flex-1 flex flex-col bg-white overflow-y-auto">
-            {rightSequence.map(vName => (
+          <div className="flex-1 flex flex-col bg-slate-50 overflow-y-auto">
+            {rightSequence.length > 0 ? rightSequence.map(vName => (
               // 배포 대상이 되는 최신 버전을 그립니다 (선택 가능 모드).
               <ManifestTable 
                 key={`right-${vName}`}
@@ -998,151 +936,15 @@ export const DeploymentPipelineDashboardSection = ({
                 toggleAllItems={toggleAllItems}
                 selectionDisabled={versionRangeInvalid || eligibilityChecking || selectionBlocked || !!eligibilityError}
               />
-            ))}
+            )) : (
+              <div className="m-5 flex min-h-[180px] items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-white p-12 text-base font-bold text-slate-500 shadow-sm">
+                업데이트 버전을 선택해주세요.
+              </div>
+            )}
           </div>
         </section>
 
       </div>
-
-      {/* 하단 영역: 배포 결과 및 로그 (좌측) & 패키징 액션 버튼 (우측) */}
-      <section className="bg-white rounded-xl border border-slate-300 shadow-lg p-5 flex flex-col xl:flex-row gap-6">
-        {/* 좌측 패널: 배포 결과 및 파일 URL 링크 표시 */}
-        <div className="w-full xl:w-2/3 flex flex-col gap-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <CheckCircleIcon className="w-6 h-6 text-green-500" />
-              <h3 className="text-xl font-extrabold text-slate-800">배포 결과 및 URL</h3>
-            </div>
-            <div className="flex items-center gap-2">
-              {/* 전체 결과 복사 버튼 */}
-              <button 
-                onClick={handleCopyAll}
-                className="flex items-center gap-1.5 text-sm font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-4 py-2 rounded-lg transition-colors border border-indigo-200 shadow-sm"
-              >
-                <CopyIcon className="w-4 h-4" />
-                {copied ? "복사 완료!" : "전체 복사"}
-              </button>
-              {/* 이전 작업이 실패했을 경우 보여지는 재시도 버튼 */}
-              {jobDetail?.job?.status === "FAILED" && (
-                <button
-                  onClick={handleRetry}
-                  disabled={packagingStarted}
-                  className="flex items-center gap-1.5 text-sm font-bold text-red-700 bg-red-50 hover:bg-red-100 px-4 py-2 rounded-lg transition-colors border border-red-200 shadow-sm"
-                >
-                  <ClockIcon className={`w-4 h-4 ${packagingStarted ? "animate-spin" : ""}`} />
-                  재시도
-                </button>
-              )}
-            </div>
-          </div>
-          
-          <div className="bg-slate-50 rounded-xl border border-slate-200 p-3 flex flex-col gap-3 max-h-[220px] overflow-y-auto">
-            {/* 에러 발생 시 경고 상자 표시 */}
-            {jobError && (
-              <div className="text-base font-bold text-red-600 p-3 bg-red-50 rounded-lg border border-red-200">
-                {jobError}
-              </div>
-            )}
-            
-            {/* 결과 폴더(OneDrive/SharePoint 등) URL이 있다면 표시 */}
-            {jobDetail?.job?.spFolderUrl && (
-              <div className="flex items-center justify-between bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm shrink-0">
-                <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-extrabold text-slate-500 uppercase mb-0.5 tracking-wider">OneDrive Folder</span>
-                  <a href={jobDetail.job.spFolderUrl} target="_blank" rel="noopener noreferrer" className="text-sm font-mono font-bold text-slate-700 hover:text-indigo-600 underline truncate">
-                    {jobDetail.job.spFolderUrl}
-                  </a>
-                </div>
-                {/* 개별 복사 버튼 */}
-                <button onClick={() => copyToClipboard(jobDetail.job.spFolderUrl)} className="p-2 text-slate-400 hover:text-indigo-600 ml-3 rounded hover:bg-indigo-50 transition-colors">
-                  <CopyIcon className="w-5 h-5" />
-                </button>
-              </div>
-            )}
-
-            {/* 개별 배포 파일 URL 목록을 렌더링합니다. */}
-            {deploymentUrls.length > 0 ? (
-              deploymentUrls.map((res) => (
-                <div key={res.imageTag} className="flex items-center justify-between bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm shrink-0">
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs font-extrabold text-green-600 uppercase mb-0.5 tracking-wider">{res.imageTag}</span>
-                    <span className="text-sm font-mono font-bold text-slate-700 truncate">{res.fileUrl}</span>
-                  </div>
-                  {/* 개별 복사 버튼 */}
-                  <button onClick={() => copyToClipboard(res.fileUrl)} className="p-2 text-slate-400 hover:text-indigo-600 ml-3 rounded hover:bg-indigo-50 transition-colors">
-                    <CopyIcon className="w-5 h-5" />
-                  </button>
-                </div>
-              ))
-            ) : packagingStarted ? (
-              // 패키징 진행 중 표시되는 안내 문구
-              <div className="flex items-center justify-center h-16 text-base font-bold text-indigo-600 animate-pulse">
-                패키징이 진행중입니다. 잠시만 기다려주세요...
-              </div>
-            ) : (
-              // 대기 상태 표시 문구
-              <div className="flex items-center justify-center h-16 text-sm font-bold text-slate-400 italic">
-                패키징을 시작하면 결과 URL이 여기에 표시됩니다.
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* 우측 패널: 선택된 장바구니 내역 및 패키징 시작 버튼 */}
-        <div className="w-full xl:w-1/3 flex flex-col justify-between xl:border-l border-slate-200 xl:pl-6 gap-3">
-          <div className="flex flex-col gap-2 flex-1">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <ShoppingCartIcon className="w-5 h-5 text-slate-700" />
-                <span className="font-extrabold text-lg text-slate-800">패키징 장바구니</span>
-              </div>
-              {/* 장바구니 비우기(초기화) 버튼 */}
-              {selectedItems.length > 0 && (
-                <button
-                  onClick={() => setSelectedItems([])}
-                  className="text-[11px] font-bold text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-200 px-2 py-1 rounded transition-colors shadow-sm"
-                >
-                  초기화
-                </button>
-              )}
-            </div>
-            {/* 담긴 아이템 목록 칩(Chip) 렌더링 */}
-            <div className="bg-slate-50 rounded-xl border border-slate-200 flex-1 p-2.5 max-h-[90px] overflow-y-auto">
-              {selectedItems.length === 0 ? (
-                // 비어있는 경우
-                <div className="flex items-center justify-center h-full text-sm font-bold text-slate-400">
-                  선택된 항목이 없습니다.
-                </div>
-              ) : (
-                // 항목이 있는 경우
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedItems.map((item, idx) => (
-                    <span key={idx} className="bg-indigo-100 border border-indigo-200 text-indigo-800 px-2 py-1 rounded text-xs font-extrabold shadow-sm">
-                      {item.versionName} - {item.code}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-          {/* 패키징 시작 메인 액션 버튼 */}
-          <button
-            onClick={handleStartPackaging}
-            disabled={packagingDisabled}
-            className={`w-full py-3 rounded-xl flex items-center justify-center gap-2 shadow-md transition-all duration-200 shrink-0 ${
-              packagingDisabled
-                ? "bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200" 
-                : "bg-[#000666] text-white hover:bg-[#090d82] active:scale-[0.98] active:shadow-sm"
-            }`}
-          >
-            {/* 상태에 따라 스피너 또는 플레이 아이콘 표시 */}
-            {packagingStarted ? <ClockIcon className="w-6 h-6 animate-spin" /> : <PlayIcon className="w-6 h-6 fill-current" />}
-            <span className="text-xl font-extrabold uppercase tracking-wide">
-              {packagingStarted ? "진행중..." : "패키징 시작"}
-            </span>
-          </button>
-        </div>
-      </section>
 
       <AlertModal
         isOpen={!!alertMessage}
