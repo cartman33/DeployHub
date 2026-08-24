@@ -1,99 +1,116 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from "react"; // React 훅 임포트
-import {
-  ChevronDownIcon // 드롭다운 화살표 아이콘
-} from "../../components/ui/Icons"; // UI 아이콘 컴포넌트 임포트
-import { AlertModal } from "../../components/ui/AlertModal"; // 경고 모달 컴포넌트 임포트
+import { useState, useRef, useEffect, useMemo, useCallback } from "react"; 
+import { ChevronDownIcon } from "../../components/ui/Icons"; 
+import { AlertModal } from "../../components/ui/AlertModal"; 
 import { VersionDropdown } from "../../components/ui/VersionDropdown";
-import { createMainVersion, deleteSubVersion, getMainVersionDetail, upsertSubVersion, updateMainVersion } from "../../services/api"; // API 호출 함수 임포트
+import { createMainVersion, deleteSubVersion, getMainVersionDetail, upsertSubVersion, updateMainVersion } from "../../services/api";
 
 // ==========================================
-// [Utility & Constants] 
-// 렌더링 시마다 불필요하게 다시 생성되지 않도록 컴포넌트 외부로 분리
+// [도우미 함수 및 고정값] 
+// 화면이 다시 그려질 때마다 똑같은 함수를 계속 새로 만들지 않도록, 부품(컴포넌트) 바깥에 따로 빼두었습니다.
 // ==========================================
 
 /**
- * 오늘 날짜를 YYYY-MM-DD 형식의 문자열로 반환하는 헬퍼 함수
+ * 새 버전을 만들 때 오늘 날짜를 기본값으로 쏙 넣어주기 위해 
+ * '연도-월-일' 모양의 글자로 바꿔주는 도우미 함수입니다.
+ * 
+ * @returns {string} 오늘 날짜 모양 (예: "2026-08-24")
  */
 const getTodayDateString = () => {
-  const today = new Date(); // 현재 날짜 객체 생성
-  const yyyy = today.getFullYear(); // 연도 추출
-  const mm = String(today.getMonth() + 1).padStart(2, '0'); // 월 추출 (0부터 시작하므로 1 더함) 및 2자리 포맷팅
-  const dd = String(today.getDate()).padStart(2, '0'); // 일 추출 및 2자리 포맷팅
-  return `${yyyy}-${mm}-${dd}`; // 조립된 문자열 반환
+  const today = new Date();
+  const yyyy = today.getFullYear();
+  const mm = String(today.getMonth() + 1).padStart(2, '0'); // 컴퓨터는 달(Month)을 0부터 세기 때문에 1을 더해줘야 진짜 이번 달이 됩니다.
+  const dd = String(today.getDate()).padStart(2, '0'); // 날짜가 1~9일일 때 앞에 '0'을 붙여서 '01', '09'처럼 두 칸을 채워줍니다.
+  return `${yyyy}-${mm}-${dd}`;
 };
 
-
-
 // ==========================================
-// [Main Component] 개발자 페이지 메인버전 등록/수정 컴포넌트
+// [메인 컴포넌트] 개발자 페이지에서 버전을 등록하고 수정하는 화면 부품
 // ==========================================
 /**
- * 메인 버전을 등록하거나 수정하는 폼 컴포넌트
+ * 개발자가 세상에 내보낼 새 버전을 등록하거나, 기존 버전에 포함된 작은 앱(서브버전)들의 목록을 관리하는 화면입니다.
  */
 export const DeveloperVersionRegistrationSection = ({
-  versions, // 전체 버전 목록
-  setVersions, // 버전 목록 업데이트 함수
-  setSelectedVersionName, // 선택된 버전명 업데이트 함수
+  versions, // 전체 앱에서 공통으로 들고 있는(App.jsx) 모든 버전의 목록입니다.
+  setVersions, // 공통 버전 목록을 새로운 내용으로 덮어쓸 때 사용하는 스위치(함수)입니다.
+  setSelectedVersionName,
   hasMore,
   loadingVersions,
   loadingMoreVersions,
   loadMoreVersions,
 }) => {
-  const dateInputRef = useRef(null); // 날짜 입력 필드에 접근하기 위한 ref 생성
+  // 날짜를 입력하는 칸에 마우스 커서를 강제로 깜빡이게 하거나 직접 건드려야 할 때, 그 칸을 콕 짚어내기 위한 '이름표'입니다.
+  const dateInputRef = useRef(null); 
 
   // ==========================================
-  // 1. 상태(State) 선언부
+  // 1. 상태(변하는 값들) 선언부
   // ==========================================
-  const [selectedDate, setSelectedDate] = useState(getTodayDateString()); // 사용자가 선택한 날짜 (기본값: 오늘)
-  const [modeType, setModeType] = useState("new"); // "new" (신규 등록 모드) 또는 "edit" (수정 모드)
-  const [editVersionMode, setEditVersionMode] = useState(""); // 수정 모드일 때 선택된 버전의 접미사 (예: "-1")
+  
+  // 사용자가 달력에서 콕 찍은 날짜입니다. 이 날짜가 새 버전의 이름(예: 2026.08.24)을 짓는 뼈대가 됩니다.
+  const [selectedDate, setSelectedDate] = useState(getTodayDateString()); 
+  
+  // 지금 화면이 어떤 상태인지 나타냅니다. - "new": 새 버전을 만드는 중 / "edit": 기존 버전을 고치는 중
+  const [modeType, setModeType] = useState("new"); 
+  
+  // 같은 날에 여러 번 배포할 때 구별하려고 붙이는 꼬리표입니다 (예: 첫 번째는 "", 두 번째는 "-1").
+  const [editVersionMode, setEditVersionMode] = useState(""); 
 
-  const [rows, setRows] = useState([]); // 테이블에 렌더링될 서브버전 행 데이터 목록
-  const [sqlScript, setSqlScript] = useState(""); // 입력된 SQL 스크립트 내용
-  const [releaseNote, setReleaseNote] = useState(""); // 입력된 릴리즈 노트 내용
-  const [alertMessage, setAlertMessage] = useState("");
-  const [alertType, setAlertType] = useState("warning"); // 화면에 띄울 경고창 메시지
+  const [rows, setRows] = useState([]); // 화면 아래쪽 표(테이블)에 그려질 줄(행) 하나하나의 정보입니다.
+  const [sqlScript, setSqlScript] = useState(""); // 새 버전에 들어갈 데이터베이스(SQL) 명령어 내용입니다.
+  const [releaseNote, setReleaseNote] = useState(""); // 고객들에게 "이번에 이런 걸 고쳤어요"라고 알려주는 안내문입니다.
+  
+  const [alertMessage, setAlertMessage] = useState(""); // 팝업창에 띄울 안내 말씀입니다.
+  const [alertType, setAlertType] = useState("warning"); 
 
-
-  const [saving, setSaving] = useState(false); // API 저장 중 여부를 나타내는 로딩 상태
+  const [saving, setSaving] = useState(false); // 저장 버튼을 연타했을 때 여러 번 저장되는 걸 막아주는 '잠금 장치'입니다.
   const [submitError, setSubmitError] = useState("");
-  const [loadingBase, setLoadingBase] = useState(false); // 기본 데이터(베이스라인)를 불러오는 중인지 여부
-  const [baseStatus, setBaseStatus] = useState(""); // 기본 데이터 로딩과 관련된 상태 메시지
-  const [loadError, setLoadError] = useState(""); // 데이터 로딩 중 발생한 에러 메시지
+  const [loadingBase, setLoadingBase] = useState(false); // '고치기' 모드로 들어갈 때, 서버에서 예전 기록을 가져오느라 기다리고 있는 상태인지 나타냅니다.
+  const [baseStatus, setBaseStatus] = useState(""); 
+  const [loadError, setLoadError] = useState(""); 
 
   // ==========================================
-  // 2. 파생 상태 및 데이터 가공 (Computed Data)
+  // 2. 기존 재료로 새로 만들어낸 데이터 (파생 정보)
   // ==========================================
 
-  // 현재 선택된 날짜에 해당하는 버전 목록만 필터링하여 최신순(내림차순)으로 정렬
+  /**
+   * [availableVersions 설명]
+   * 사용자가 달력에서 어떤 날짜(예: 2026-08-04)를 골랐을 때, 그 날짜로 만들어진 
+   * 버전들("2026.08.04", "2026.08.04-1" 등)만 쏙쏙 뽑아냅니다. 이렇게 하면 다음 꼬리표 번호를 찾기 쉽습니다.
+   * 화면이 그려질 때마다 계산하면 힘드니(useMemo), '선택된 날짜'나 '전체 목록'이 바뀔 때만 다시 계산하도록 기억해둡니다.
+   */
   const availableVersions = useMemo(() => {
-    if (!selectedDate) return []; // 선택된 날짜가 없으면 빈 배열 반환
+    if (!selectedDate) return []; 
+    // '2026-08-24' 처럼 대시(-)로 된 날짜를 '2026.08.24' 처럼 점(.)으로 바꿔줍니다. (서버가 좋아하는 모양입니다)
     const prefix = selectedDate.replace(/-/g, '.');
-    return versions.filter(v => v.versionName === prefix || v.versionName.startsWith(prefix + '-')) // 해당 날짜 접두사로 시작하는 버전만 필터링
+    
+    return versions
+      .filter(v => v.versionName === prefix || v.versionName.startsWith(prefix + '-'))
       .sort((a, b) => {
-        // 하이픈(-) 뒷부분의 숫자(접미사)를 파싱하여 내림차순 정렬
+        // [줄 세우기] 꼬리표에 있는 '-1', '-2' 같은 숫자를 떼어내서 가장 큰 숫자(가장 최신)가 맨 앞에 오도록 정렬합니다.
         const aSuf = parseInt(a.versionName.split('-')[1] || "1", 10);
         const bSuf = parseInt(b.versionName.split('-')[1] || "1", 10);
-        return bSuf - aSuf; // 큰 번호가 먼저 오도록 정렬 (descending)
+        return bSuf - aSuf;
       });
-  }, [selectedDate, versions]); // 선택된 날짜나 전체 버전 목록이 변경될 때만 재계산
+  }, [selectedDate, versions]); 
 
-  // 필터링된 버전 중 가장 높은 접미사(인덱스) 계산
-  // [수정됨] 해당 날짜에 배포된 버전들 중 가장 높은 인덱스 번호를 계산
-  // "2026.08.04" 오리지널 버전이 존재하면 0, "2026.08.04-1"이 존재하면 1 반환. 아예 없으면 -1 반환
+  /**
+   * [maxSuffix(가장 큰 꼬리표 번호) 찾는 방법]
+   * 같은 날짜에 만들어진 버전 중 제일 마지막 번호가 몇 번인지 찾아냅니다.
+   * 꼬리표가 없으면 0, '-1'이 있으면 1입니다. 이 번호에 1을 더해서 
+   * 새 버전 이름 뒤에 붙여주면(예: "2026.08.04-2"), 기존 이름과 겹치는 사고를 막을 수 있습니다.
+   */
   const maxSuffix = availableVersions.length > 0
     ? Math.max(...availableVersions.map(v => {
       if (v.versionName === selectedDate.replace(/-/g, '.')) return 0;
       const parts = v.versionName.split('-');
       return parts.length > 1 ? parseInt(parts[1], 10) : 0;
     }))
-    : -1; // 해당 날짜에 등록된 버전이 없으면 0
+    : -1; 
 
   const initializedVersionRef = useRef(false);
 
+  // [처음 화면이 뜰 때 가장 최근 버전을 보여주기]
+  // 화면이 맨 처음 열릴 때만, 목록에서 제일 위에 있는 따끈따끈한 최신 버전을 '고치기 모드'로 바로 열어줍니다.
   useEffect(() => {
-    // 최초 목록 로딩 때만 최신 버전을 선택한다. 이후 목록 갱신이 사용자의 편집 대상이나
-    // 신규 작성 모드를 임의로 덮어쓰지 않도록 ref로 초기화를 한 번만 허용한다.
     if (initializedVersionRef.current || versions.length === 0) return;
 
     const latestVersionName = versions[0].versionName;
@@ -108,59 +125,74 @@ export const DeveloperVersionRegistrationSection = ({
     ? `${selectedDate.replace(/-/g, '.')}${editVersionMode ? `-${editVersionMode}` : ''}`
     : "";
 
+  /**
+   * 화면 위쪽의 목록 상자(드롭다운)에서 기존 버전을 하나 골랐을 때 실행되는 행동입니다.
+   */
   const handleSelectExistingVersion = (versionName) => {
     const [datePart, suffix = ""] = versionName.split('-');
     setSelectedDate(datePart.replace(/\./g, '-'));
     setEditVersionMode(suffix);
-    setModeType("edit");
+    setModeType("edit"); // 이제부터 이 버전을 '고치는 모드'로 바꿉니다.
     setSubmitError("");
     setLoadError("");
   };
 
+  /**
+   * '+ 새 메인버전 만들기' 버튼을 누르면, 모든 입력칸을 깨끗하게 비우고 새 종이를 꺼냅니다.
+   */
   const handleStartNewVersion = () => {
     setModeType("new");
     setSelectedDate(getTodayDateString());
     setEditVersionMode("");
-    setRows([]);
-    setSqlScript("");
-    setReleaseNote("");
+    setRows([]); // 아래쪽 표(테이블)를 싹 비웁니다.
+    setSqlScript(""); // SQL 명령어 입력칸도 비웁니다.
+    setReleaseNote(""); 
     setSubmitError("");
     setLoadError("");
     setBaseStatus("");
   };
 
   // ==========================================
-  // 3. 주요 로직 (데이터 로딩 및 테이블 조작)
+  // 3. 핵심 동작 (데이터 가져오고 표 다루기)
   // ==========================================
 
   /**
-   * 메인버전 상세 응답을 편집 가능한 행으로 변환한다.
-   * originalValues/originalStatus는 화면 표시용 복사본이 아니라 변경 여부를 판정하는 기준점이다.
+   * 서버에서 보내준 작은 앱들의 목록(detailData)을 화면의 입력칸에 쏙쏙 넣기 좋게 알맞은 모양(행 데이터)으로 바꿔줍니다.
+   * 
+   * [originalValues(처음 모습)와 originalStatus(처음 상태)가 필요한 이유]
+   * 사용자가 글자를 고치거나 순서를 바꿨을 때, "아, 처음이랑 달라졌구나!(수정됨)" 하고 눈치채기 위해 
+   * 처음 도착했을 때의 모습을 '원본 사진'처럼 간직해두는 것입니다.
    */
   const buildRowsFromDetail = (detailData, forcePending, clearNotes) => {
     if (!detailData || !detailData.subVersions || !detailData.subVersions.length) return [];
+    
     return detailData.subVersions.map((sub, index) => {
       let pureNote = sub.note || "";
-      if (clearNotes) pureNote = "";
+      // 새 버전을 만들 때는 이전 버전의 껍데기(앱 목록)만 밑바탕으로 빌려오고,
+      // 그 안에 적혀있던 지난 작업 메모(note)는 필요 없으니 깨끗하게 지우는 역할입니다.
+      if (clearNotes) pureNote = ""; 
+      
       const existingStatus = sub.submitStatus || "UNCHANGED";
+      // 새 버전을 밑바탕부터 새로 짤 때는, 모든 앱이 새로 나갈 준비를 하도록 강제로 '대기중(pending)' 딱지를 붙입니다.
       const statusValue = forcePending
         ? "pending"
         : (existingStatus.toLowerCase() === "updated" ? "updated" : existingStatus.toLowerCase() === "pending" ? "pending" : "unchanged");
+        
       const component = sub.components?.length > 0
-        ? sub.components.map(c => c.imageTag).join('\n')
+        ? sub.components.map(c => c.imageTag).join('\n') // 이름표가 여러 개면 엔터(줄바꿈)를 쳐서 세로로 예쁘게 보여줍니다.
         : "";
+        
       const originalValues = {
         subVersion: sub.code || "",
         component,
         tag: sub.version || "",
         note: pureNote,
-        sortOrder: index,
+        sortOrder: index, // 처음 몇 번째 줄에 있었는지 기억해둡니다 (나중에 마우스로 끌어서 자리가 바뀌었는지 확인하기 위해)
       };
+      
       return {
-        id: `row_${sub.id || sub.code || index}`,
-        // code는 사용자가 수정할 수 있으므로 DELETE 식별자로 쓸 수 없다.
-        // 서버가 발급한 불변 ID를 별도로 보관해 실제 저장 행만 삭제 API에 전달한다.
-        serverId: sub.id ?? null,
+        id: `row_${sub.id || sub.code || index}`, // 화면에 표를 그릴 때 각각의 줄을 헷갈리지 않게 구별하는 '주민등록번호'입니다.
+        serverId: sub.id ?? null, // [서버용 번호가 따로 있는 이유] 앱 이름(code)은 사용자가 마음대로 고칠 수 있어서, 나중에 지울 때 확실한 표식(서버 ID)이 필요합니다.
         subVersion: sub.code || "",
         component,
         tag: sub.version || "",
@@ -169,13 +201,13 @@ export const DeveloperVersionRegistrationSection = ({
         originalStatus: statusValue,
         originalValues,
         desc: sub.code || "Custom Component",
-        dirty: false,
+        dirty: false, // 사용자가 손을 댔는지(수정했는지) 표시하는 깃발입니다. 처음엔 아직 안 고쳤으니 false입니다.
       };
     });
   };
 
   /**
-   * 모드(신규/수정) 전환 시, 이전 버전의 데이터를 바탕으로 폼(테이블, 텍스트박스 등)을 세팅하는 함수
+   * 새 종이를 꺼내거나 다른 버전을 골랐을 때, 과거의 기록을 가져와서 폼의 '밑그림(기본 바탕)'으로 깔아주는 역할입니다.
    */
   const loadBaseline = useCallback(async () => {
     if (modeType === "edit" || editVersionMode) {
@@ -184,17 +216,18 @@ export const DeveloperVersionRegistrationSection = ({
       setLoadError("");
       try {
         const prefix = selectedDate.replace(/-/g, '.');
-        // [수정됨] editVersionMode가 "" 이면 오리지널 버전(ex: 2026.08.04)을 타겟으로 API 조회 (404 버그 해결)
         const targetVersionName = editVersionMode ? `${prefix}-${editVersionMode}` : prefix;
 
         const detail = await getMainVersionDetail(targetVersionName);
 
         if (modeType === "new") {
+          // 새 버전을 만들 때는 이전 뼈대만 빌려오니까, 상태는 '대기중'으로 맞추고 예전 메모는 싹 지워줍니다.
           setRows(buildRowsFromDetail(detail, true, true));
-          setSqlScript("");
+          setSqlScript(""); 
           setReleaseNote("");
           setBaseStatus(`이전 버전(${targetVersionName})을 기반으로 새 버전을 작성합니다.`);
         } else {
+          // 기존 버전을 고칠 때는 예전 정보의 있는 모습 그대로를 가져옵니다.
           setRows(buildRowsFromDetail(detail, false, false));
           setSqlScript(detail.mainVersion?.sqlScript || "");
           setReleaseNote(detail.mainVersion?.releaseNote || "");
@@ -208,7 +241,6 @@ export const DeveloperVersionRegistrationSection = ({
         setLoadError(message);
         setAlertType("warning");
         setAlertMessage(message);
-        setBaseStatus("");
       } finally {
         setLoadingBase(false);
       }
@@ -220,8 +252,8 @@ export const DeveloperVersionRegistrationSection = ({
   }, [modeType, versions.length, loadBaseline]);
 
   const handleRefreshAppInfo = () => {
-    // 여러 개발자가 같은 버전을 편집할 수 있어 서버 값을 다시 읽되,
-    // 로컬의 미저장 변경을 조용히 잃지 않도록 명시적인 확인을 거친다.
+    // [소중한 작업물 보호하기] 내가 열심히 글 고치고 있는데 새로고침을 해버리면 다 날아가겠죠?
+    // 그래서 화면에 조금이라도 '손댄(수정된)' 흔적이 있다면, 정말 덮어쓸 건지 한 번 더 물어보는 안전장치입니다.
     if (rows.some((row) => row.dirty)
       && !window.confirm("저장하지 않은 APP 정보가 있습니다. 서버의 최신 정보로 새로고침하시겠습니까?")) {
       return;
@@ -230,132 +262,110 @@ export const DeveloperVersionRegistrationSection = ({
   };
 
   // ==========================================
-  // 4. 테이블 행 드래그 앤 드롭 로직
+  // 4. 표의 줄을 마우스로 끌어서 옮기는 기능 (드래그 앤 드롭)
   // ==========================================
-  const [draggedIndex, setDraggedIndex] = useState(null); // 현재 드래그 중인 행의 인덱스를 저장하는 상태
-  const trRefs = useRef([]); // 테이블 행(<tr>)의 DOM 요소에 접근하기 위한 refs 배열
+  // 앱들이 화면에 보이는 순서는 나중에 실제 서비스에 나갈 때의 순서이기도 합니다.
+  // 그래서 사용자가 마우스로 꾹 눌러서 위아래로 쉽게 순서를 바꿀 수 있도록 만들었습니다.
+  const [draggedIndex, setDraggedIndex] = useState(null); 
+  const trRefs = useRef([]); 
 
-  /**
-   * 드래그가 시작될 때 호출되는 핸들러. 
-   * 드래그 중인 항목의 인덱스를 상태에 저장하고 브라우저 이펙트를 'move'로 설정함.
-   */
   const handleDragStart = (e, index) => {
-    setDraggedIndex(index); // 드래그하는 아이템의 인덱스 기록
-    e.dataTransfer.effectAllowed = "move"; // 마우스 커서를 이동 모양으로 설정
+    setDraggedIndex(index); 
+    e.dataTransfer.effectAllowed = "move"; 
   };
 
-  /**
-   * 드래그 중인 항목이 다른 항목 위에 있을 때 호출되는 핸들러.
-   * 기본 브라우저 동작을 막아야 drop 이벤트가 발생할 수 있음.
-   */
   const handleDragOver = (e, index) => {
-    e.preventDefault(); // 기본 이벤트 방지하여 drop 허용
+    e.preventDefault(); // 브라우저가 원래 하려던 딴짓(금지 마크 띄우기 등)을 막아야, 우리가 원하는 곳에 무사히 내려놓을 수 있습니다.
   };
 
-  /**
-   * 드래그한 항목을 놓았을 때 호출되는 핸들러.
-   * 항목들의 순서를 교체하고 rows 상태를 업데이트함.
-   */
   const handleDrop = (e, targetIndex) => {
-    e.preventDefault(); // 기본 이벤트 방지
-    // 드래그 인덱스가 유효하지 않거나 제자리에 놓은 경우엔 무시
+    e.preventDefault(); 
     if (draggedIndex === null || draggedIndex === targetIndex) return;
 
-    const newRows = [...rows]; // 원본 배열 복사 (불변성 유지)
-    const draggedItem = newRows[draggedIndex]; // 드래그된 아이템 객체 백업
-    newRows.splice(draggedIndex, 1); // 배열에서 드래그된 아이템 제거
-    newRows.splice(targetIndex, 0, draggedItem); // 타겟 위치에 아이템 삽입하여 순서 변경
-    // 이동한 행 외에도 밀려난 행의 sortOrder가 바뀌므로 전체 행을 원본 순서와 다시 비교한다.
+    const newRows = [...rows]; 
+    const draggedItem = newRows[draggedIndex]; 
+    newRows.splice(draggedIndex, 1); // 원래 있던 자리에서 뽑아냅니다.
+    newRows.splice(targetIndex, 0, draggedItem); // 마우스를 놓은 자리에 쏙 끼워 넣습니다.
+
+    // 내가 옮긴 줄 때문에 다른 줄들도 위아래로 밀려나서 번호표가 바뀌었을 겁니다.
+    // 그래서 모든 줄을 하나씩 보면서 "너 원래 자리랑 달라졌니?" 하고 확인하여 변경 표시를 해줍니다.
     setRows(newRows.map((row, index) => {
       const dirty = isRowChanged(row, index);
       return {
         ...row,
         dirty,
-        status: row.originalStatus === "unchanged"
-          ? (dirty ? "updated" : "unchanged")
-          : row.status,
+        // 안 고친 상태(unchanged)였던 줄이라도 자리가 바뀌었다면, 서버에 바뀐 자리를 알려줘야 하니 '수정됨(updated)'으로 슬쩍 바꿔줍니다.
+        status: row.originalStatus === "unchanged" ? (dirty ? "updated" : "unchanged") : row.status,
       };
-    })); // 순서가 원래와 달라진 행만 변경 상태로 표시
-    setDraggedIndex(null); // 드래그 인덱스 초기화
+    })); 
+    setDraggedIndex(null); 
   };
 
-  /**
-   * 드래그 핸들을 마우스로 눌렀을 때 해당 행을 드래그 가능(draggable=true)하게 활성화.
-   */
+  // 언제나 드래그할 수 있게 열어두면, 글씨를 복사하려고 블록을 씌우려다 표 전체가 질질 끌려오는 답답한 일이 생깁니다.
+  // 그래서 마우스로 "이동" 글자를 꾹 누를 때만 끌고 다닐 수 있게 잠금을 풀어줍니다.
   const enableDrag = (index) => {
-    if (trRefs.current[index]) {
-      trRefs.current[index].draggable = true; // HTML5 드래그 앤 드롭 활성화
-    }
+    if (trRefs.current[index]) trRefs.current[index].draggable = true; 
+  }
+  const disableDrag = (index) => {
+    if (trRefs.current[index]) trRefs.current[index].draggable = false; 
   }
 
   /**
-   * 마우스 클릭을 떼거나 벗어났을 때 해당 행의 드래그를 다시 비활성화.
-   * 텍스트 입력창 등에서 텍스트 드래그와 충돌하는 것을 방지하기 위함.
+   * 이 줄의 내용이나 자리가 처음과 달라졌는지(수정되었는지) 검사하는 탐정 같은 함수입니다.
    */
-  const disableDrag = (index) => {
-    if (trRefs.current[index]) {
-      trRefs.current[index].draggable = false; // HTML5 드래그 앤 드롭 비활성화
-    }
-  }
-
   const isRowChanged = (row, currentIndex) => {
-    // 입력 필드뿐 아니라 드래그로 바뀐 순서도 서버에 저장되는 값이므로 변경으로 취급한다.
-    // 원본과 다시 같아지면 false가 되어 UPDATED 상태도 UNCHANGED로 복원될 수 있다.
-    if (!row.originalValues) return true;
+    if (!row.originalValues) return true; // 방금 새로 만든(서버에 원본 사진이 없는) 줄은 무조건 새로 생긴 것이니 변경된 것으로 봅니다.
+    
     return row.subVersion !== row.originalValues.subVersion
       || row.component !== row.originalValues.component
       || row.tag !== row.originalValues.tag
       || row.note !== row.originalValues.note
-      || currentIndex !== row.originalValues.sortOrder;
+      || currentIndex !== row.originalValues.sortOrder; // 글자를 고친 것뿐만 아니라, 자리를 이동한 것도 바뀐 것이니 꼭 챙깁니다.
   };
 
   /**
-   * 각 테이블 셀의 입력값이 변경될 때 rows 상태를 업데이트하는 핸들러
+   * 사용자가 표 안의 네모 칸에 글자를 타닥타닥 칠 때마다 실행되어 글자를 바꿔치기해주는 역할입니다.
    */
   const handleRowChange = (index, field, value) => {
-    const newRows = [...rows]; // 배열 복사
+    const newRows = [...rows]; 
     const nextRow = { ...newRows[index], [field]: value };
+    
     if (field !== "status") {
-      // EXT는 외부 산출물이라 IMAGE TAG를 갖지 않는다는 API 계약을 입력 단계에서도 강제한다.
+      // [특별한 규칙] 'EXT'는 우리 동네가 아닌 바깥 동네에서 가져온 것이라서, 태그(IMAGE TAG)라는 이름표를 달 수 없습니다.
+      // 사용자가 무심코 'EXT'라고 적으면, 헷갈리지 않게 태그 칸을 재빨리 지워버립니다.
       if (field === "subVersion" && value.trim().toUpperCase() === "EXT") {
         nextRow.component = "";
       }
       nextRow.dirty = isRowChanged(nextRow, index);
-      // 서버에서 UNCHANGED였던 행만 자동 상태 전환 대상으로 삼는다.
-      // 이미 PENDING/UPDATED인 서버 상태는 단순 입력만으로 되돌리지 않는다.
+      
       if (nextRow.originalStatus === "unchanged") {
         nextRow.status = nextRow.dirty ? "updated" : "unchanged";
       }
     }
     newRows[index] = nextRow;
-    setRows(newRows); // 상태 업데이트
+    setRows(newRows);
   };
 
-  /**
-   * 새로운 빈 서브버전 행을 테이블의 맨 아래에 추가하는 함수
-   */
   const addRow = () => {
     setRows([...rows, {
-      id: `custom_${Date.now()}`, // 고유 ID 발급
-      subVersion: "NEW", // 기본값
-      component: "", // IMAGE TAG는 선택 입력
-      tag: "", // 빈 태그
-      note: "", // 빈 노트
-      status: "updated", // 기본 상태
+      id: `custom_${Date.now()}`, 
+      subVersion: "NEW", 
+      component: "", 
+      tag: "", 
+      note: "", 
+      status: "updated", 
       originalStatus: null,
       originalValues: null,
-      desc: "Custom Component", // 커스텀 항목 설명
+      desc: "Custom Component",
       dirty: true,
     }]);
   };
 
-  /**
-   * 특정 행을 삭제하는 함수
-   */
   const removeRow = async (index) => {
     const row = rows[index];
     if (window.confirm(`[${row.subVersion}] 컴포넌트를 삭제하시겠습니까?\n(서버에 저장된 경우 DB에서도 삭제됩니다.)`)) {
-      // 아직 저장하지 않은 새 행은 로컬에서만 제거하고, 서버 ID가 있는 행만 실제 DELETE 한다.
+      
+      // 이미 서버에 저장된 적이 있는 항목이라면, 서버에게도 "이거 지워줘!"라고 연락(DELETE API)을 합니다.
       if (row.serverId != null) {
         setSaving(true);
         try {
@@ -368,14 +378,20 @@ export const DeveloperVersionRegistrationSection = ({
         }
         setSaving(false);
       }
+      // 내 화면(로컬)의 표에서도 이 줄을 지워버립니다.
       const newRows = [...rows];
       newRows.splice(index, 1);
       setRows(newRows);
     }
   };
 
+  // ==========================================
+  // 5. 다 쓴 서류 제출하기 (서버에 저장)
+  // ==========================================
+
   /**
-   * 메인버전 컨테이너를 먼저 생성한다. APP별 데이터는 생성 후 각 행의 저장 API로 별도 등록한다.
+   * 새로운 버전을 담을 커다란 '빈 박스(메인 버전)'를 만듭니다. 
+   * (아래쪽 표에 있는 작은 앱 정보들은 이 박스를 만든 뒤에 하나씩 따로따로 담아서 저장할 겁니다.)
    */
   const handleRegisterMainVersion = async () => {
     const prefix = selectedDate.replace(/-/g, '.');
@@ -384,13 +400,13 @@ export const DeveloperVersionRegistrationSection = ({
     setSubmitError("");
 
     try {
-      // 1. 백엔드에 신규 메인 버전 등록 API 호출
+      // 1. 서버 은행원(백엔드)에게 가서 "이 이름으로 새 버전을 만들어주세요!"라고 요청합니다. (SQL, 안내문 포함)
       await createMainVersion(targetVersionName, {
         releaseNote: releaseNote || undefined,
         sqlScript: sqlScript || undefined,
       });
 
-      // 2. 컨텍스트의 버전 목록 상태 갱신
+      // 2. 우리가 모두 같이 보는 전체 버전 목록 장부 맨 앞줄에 방금 만든 따끈따끈한 버전을 적어넣습니다.
       const newSummary = {
         versionName: targetVersionName,
         subVersionCount: 0,
@@ -400,7 +416,7 @@ export const DeveloperVersionRegistrationSection = ({
       setVersions([newSummary, ...versions]);
       setSelectedVersionName(targetVersionName);
 
-      // 3. 모드를 '수정' 모드로 변경하여 매니페스트 편집 활성화 (loadBaseline 자동 실행)
+      // 3. 박스 만들기에 성공했으니, 이제 화면을 '고치기' 상태로 바꿔서 표를 채울 수 있도록 문을 활짝 엽니다.
       setModeType("edit");
       setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
 
@@ -411,7 +427,7 @@ export const DeveloperVersionRegistrationSection = ({
         setSubmitError(message);
         setAlertType("warning"); setAlertMessage(message);
       } else {
-        // 이미 등록된 경우 모드만 변경
+        // 만약 내 옆자리에 앉은 동료가 0.1초 빨리 같은 이름으로 버전을 만들어 버렸다면(409 충돌 에러),
         setModeType("edit");
         setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
         setAlertType("warning"); setAlertMessage("이미 등록된 버전입니다. 수정 모드로 전환되었습니다.");
@@ -421,12 +437,10 @@ export const DeveloperVersionRegistrationSection = ({
     }
   };
 
-  // ==========================================
-  // 5. 폼 제출 로직 (Submit)
-  // ==========================================
-
   /**
-   * 단건 서브버전을 저장한다. 메인버전 문서(SQL/Release Note) 저장과 API 책임이 분리되어 있다.
+   * 표에서 고른 딱 한 줄(앱 하나)의 정보만 서버에 새로 쓰거나 덮어씁니다.
+   * [왜 따로 저장할까요?] 전체 버전에 딸린 수십 개의 앱 정보를 한 번에 큰 보따리로 묶어서 보내면, 
+   * 보따리가 너무 무거워지고 가다가 하나만 넘어져도 다 실패할 수 있어서, 안전하게 하나씩 택배를 보내는 방식을 골랐습니다.
    */
   const handleSaveRow = async (index) => {
     const row = rows[index];
@@ -437,10 +451,9 @@ export const DeveloperVersionRegistrationSection = ({
 
     const prefix = selectedDate.replace(/-/g, '.');
     const targetVersionName = (editVersionMode ? `${prefix}-${editVersionMode}` : prefix);
-
     const desiredStatus = (row.status === "updated") ? "UPDATED" : (row.status === "pending") ? "PENDING" : "UNCHANGED";
 
-    // 변경 데이터가 UNCHANGED로 저장되어 배포 비교에서 누락되는 모순을 프론트에서도 차단한다.
+    // 내용을 고쳐놓고서 상태를 '안 바뀜(UNCHANGED)'으로 속여서 보내면, 나중에 배포 담당자가 모를 수 있으니 엄격하게 막습니다.
     if (row.dirty && desiredStatus === "UNCHANGED") {
       setAlertType("warning");
       setAlertMessage("APP 정보가 변경되었습니다. STATUS를 UPDATED 또는 PENDING으로 선택해주세요.");
@@ -450,32 +463,28 @@ export const DeveloperVersionRegistrationSection = ({
     const payload = {
       code: row.subVersion,
       version: row.tag,
-      sortOrder: index,
-      submitStatus: desiredStatus, // 상태도 함께 전송
+      sortOrder: index, // 화면에서 몇 번째 줄에 있었는지 순서를 서버에 알려주어 영원히 기억하게 합니다.
+      submitStatus: desiredStatus, 
     };
 
     const finalNote = row.note ? row.note.trim() : "";
-    // NOTE는 선택 필드다. 빈 값은 필드를 생략해 선택값이라는 API 계약을 유지한다.
-    if (finalNote !== "") {
-      payload.note = finalNote;
-    }
+    if (finalNote !== "") payload.note = finalNote;
 
-    // EXT는 IMAGE TAG가 없는 APP이므로 명시적으로 빈 배열을 전송한다.
+    // [특별 대우] 바깥에서 온 'EXT' 친구는 태그라는 걸 가질 수 없으니, 억지로 빈 칸이라도 만들어서 서버가 당황하지 않게 도와줍니다.
     if (row.subVersion.trim().toUpperCase() === "EXT") {
       payload.imageTags = [];
     } else if (row.component) {
+      // 여러 줄로 쓴 태그들을 엔터 키를 기준으로 하나씩 가위로 오려서 서버에 전달합니다.
       payload.imageTags = row.component.split('\n').map(t => t.trim()).filter(Boolean);
     }
 
     setSaving(true);
     setSubmitError("");
     try {
-      // 단건 서브버전 저장 API 호출
       await upsertSubVersion(targetVersionName, row.subVersion, payload);
-
       setAlertType("warning"); setAlertMessage(`${row.subVersion} 컴포넌트 정보가 저장되었습니다.`);
 
-      // 최신 데이터를 다시 불러와서 테이블 갱신
+      // 한 줄 저장이 잘 끝났으니, 서버가 가진 가장 깨끗한 최신본으로 표 전체를 한 번 새로고침 해줍니다.
       const finalDetail = await getMainVersionDetail(targetVersionName);
       setRows(buildRowsFromDetail(finalDetail, false));
     } catch (error) {
@@ -487,6 +496,9 @@ export const DeveloperVersionRegistrationSection = ({
     }
   };
 
+  /**
+   * 커다란 박스 껍데기에 적힌 글씨(SQL 명령어, 릴리즈 노트)만 지우개로 지우고 새로 적어주는 함수입니다.
+   */
   const handleUpdateMainVersionInfo = async () => {
     const prefix = selectedDate.replace(/-/g, '.');
     const targetVersionName = editVersionMode ? `${prefix}-${editVersionMode}` : prefix;
@@ -494,13 +506,12 @@ export const DeveloperVersionRegistrationSection = ({
     setSaving(true);
     setSubmitError("");
     try {
-      // 빈 문자열도 그대로 보내 사용자가 기존 SQL/Release Note를 지우는 동작을 지원한다.
       await updateMainVersion(targetVersionName, {
         releaseNote,
         sqlScript,
       });
       setAlertType("success");
-      setAlertMessage(`메인버전 ${targetVersionName}의 SQL과 Release Note가 수정되었습니다.`);
+      setAlertMessage(`메인버전 ${targetVersionName}의 배포 문서가 수정되었습니다.`);
     } catch (error) {
       const message = error.payload?.message || error.message || "메인버전 정보 수정 중 오류가 발생했습니다.";
       setSubmitError(message);
@@ -516,7 +527,6 @@ export const DeveloperVersionRegistrationSection = ({
   // ==========================================
   return (
     <div className="w-full max-w-[1920px] mx-auto p-8 flex flex-col gap-8">
-      {/* 헤더 섹션: 타이틀 및 설명 */}
       <header className="flex flex-col gap-2">
         <div>
           <h1 className="text-4xl font-bold tracking-tight text-[#000666]">
@@ -528,9 +538,7 @@ export const DeveloperVersionRegistrationSection = ({
         </p>
       </header>
 
-      {/* 메인 편집 영역 */}
       <div className="flex flex-col gap-8">
-
         {/* 섹션 1: 메인버전 정보 설정 */}
         <section className="bg-white rounded-xl border border-slate-300 shadow-md p-6 flex flex-col gap-6">
           <div className="border-b pb-4 border-slate-100">
@@ -539,6 +547,7 @@ export const DeveloperVersionRegistrationSection = ({
             </h2>
           </div>
 
+          {/* 버전 조작부: 기존 선택 드롭다운과 신규생성 버튼 영역 */}
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4 items-end">
             <div className="flex flex-col gap-2">
               <label htmlFor="existing-main-version" className="text-base font-bold text-slate-500 uppercase tracking-wider">
@@ -565,6 +574,7 @@ export const DeveloperVersionRegistrationSection = ({
             </button>
           </div>
 
+          {/* 신규 생성일 경우 날짜 피커(Calendar) 표시, 아닐 땐 읽기 전용 텍스트 배지 표시 */}
           {modeType === "new" ? (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 rounded-xl border border-indigo-200 bg-indigo-50/60 p-5">
               <div className="flex flex-col gap-2">
@@ -595,6 +605,7 @@ export const DeveloperVersionRegistrationSection = ({
             </div>
           )}
 
+          {/* 문서 입력 폼 */}
           <div className="flex flex-col gap-4 border-t border-slate-100 pt-6">
             <div>
               <h3 className="text-xl font-bold text-slate-800">
@@ -609,7 +620,7 @@ export const DeveloperVersionRegistrationSection = ({
                   onChange={(e) => setSqlScript(e.target.value)}
                   placeholder="이번 배포에 적용할 DB SQL 스크립트를 입력하세요."
                   rows={6}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-3.5 px-4 text-base font-mono text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all resize-y"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-3.5 px-4 text-base font-mono text-slate-800 focus:ring-2 focus:ring-[#1a237e] outline-none transition-all resize-y"
                 />
               </div>
               <div className="flex flex-col gap-2">
@@ -619,18 +630,18 @@ export const DeveloperVersionRegistrationSection = ({
                   onChange={(e) => setReleaseNote(e.target.value)}
                   placeholder="고객사 전달용 릴리즈 노트를 입력하세요."
                   rows={6}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-3.5 px-4 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all resize-y"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 py-3.5 px-4 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] outline-none transition-all resize-y"
                 />
               </div>
             </div>
           </div>
 
-          {/* 입력 폼 리셋 및 새로고침 버튼 영역 대신 신규 등록 버튼 표시 */}
+          {/* 메인 폼 컨트롤(저장/생성) 영역 */}
           {modeType === "new" && (
             <div className="flex justify-end pt-2 border-t border-slate-100 gap-3">
               <button
                 type="button"
-                onClick={handleRegisterMainVersion} // 신규 등록 핸들러
+                onClick={handleRegisterMainVersion} 
                 disabled={saving}
                 className={`py-2.5 px-8 text-base font-bold text-white bg-indigo-500 hover:bg-indigo-600 rounded-lg transition-all shadow-sm active:scale-95 ${saving ? "opacity-50 cursor-not-allowed" : ""}`}
               >
@@ -652,7 +663,7 @@ export const DeveloperVersionRegistrationSection = ({
           )}
         </section>
 
-        {/* 섹션 3: 매니페스트 (서브버전) 상세 정보 입력 테이블 */}
+        {/* 섹션 3: 매니페스트 (서브버전) 상세 정보 입력 테이블 (새로 생성 중일 땐 미노출) */}
         {modeType !== "new" && (
           <section className="bg-white rounded-xl border border-slate-300 shadow-md flex flex-col overflow-hidden">
             <div className="p-6 flex items-center justify-between border-b border-slate-100">
@@ -663,8 +674,7 @@ export const DeveloperVersionRegistrationSection = ({
                 type="button"
                 onClick={handleRefreshAppInfo}
                 disabled={saving || loadingBase}
-                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
-                title="선택한 메인버전의 최신 APP 정보를 서버에서 다시 불러옵니다."
+                className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-600 shadow-sm hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 disabled:opacity-50"
               >
                 {loadingBase ? "불러오는 중..." : "새로고침"}
               </button>
@@ -680,7 +690,6 @@ export const DeveloperVersionRegistrationSection = ({
                   <col className="w-[155px]" />
                   <col className="w-[140px]" />
                 </colgroup>
-                {/* 테이블 헤더 */}
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
                     <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider">APP</th>
@@ -688,29 +697,27 @@ export const DeveloperVersionRegistrationSection = ({
                     <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider">IMAGE TAG <span className="text-red-500">*</span></th>
                     <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider">NOTE</th>
                     <th className="px-4 py-3.5 text-sm font-bold text-slate-500 uppercase tracking-wider">STATUS</th>
-                    <th className="sticky right-0 z-10 bg-slate-50 px-4 py-3.5 text-right text-sm font-bold text-slate-500 uppercase tracking-wider shadow-[-1px_0_0_#e2e8f0]"></th>
+                    <th className="sticky right-0 z-10 bg-slate-50 px-4 py-3.5 text-right text-sm font-bold text-slate-500 shadow-[-1px_0_0_#e2e8f0]"></th>
                   </tr>
                 </thead>
-                {/* 테이블 바디 (서브버전 행 매핑) */}
                 <tbody className="divide-y divide-slate-100">
                   {rows.map((row, index) => (
                     <tr
-                      key={row.id} // 고유 식별자
+                      key={row.id} 
                       className="hover:bg-slate-50/50 transition-colors group"
-                      ref={el => trRefs.current[index] = el} // 드래그 제어를 위해 DOM ref 연결
-                      onDragStart={(e) => handleDragStart(e, index)} // 드래그 시작 이벤트
-                      onDragOver={(e) => handleDragOver(e, index)} // 드래그 오버(드롭 허용) 이벤트
-                      onDrop={(e) => handleDrop(e, index)} // 드롭(순서 변경) 이벤트
+                      ref={el => trRefs.current[index] = el} 
+                      onDragStart={(e) => handleDragStart(e, index)} 
+                      onDragOver={(e) => handleDragOver(e, index)} 
+                      onDrop={(e) => handleDrop(e, index)} 
                     >
-                      {/* APP 열: 앱 코드 입력 및 드래그/삭제 기능 */}
+                      {/* APP (드래그 핸들 포함) */}
                       <td className="px-4 py-3 border-b border-slate-100 min-w-[200px]">
                         <div className="flex items-center gap-2">
-                          {/* 이동 텍스트를 잡을 때만 행 드래그를 활성화합니다. */}
                           <div
                             className="cursor-grab text-xs font-bold text-slate-400 hover:text-slate-600 p-1 select-none"
-                            onMouseDown={() => enableDrag(index)} // 마우스 누를 때 드래그 활성화
-                            onMouseUp={() => disableDrag(index)} // 뗄 때 비활성화
-                            onMouseLeave={() => disableDrag(index)} // 영역 벗어날 때 비활성화 (버그 방지)
+                            onMouseDown={() => enableDrag(index)} 
+                            onMouseUp={() => disableDrag(index)} 
+                            onMouseLeave={() => disableDrag(index)} 
                             title="드래그하여 순서 변경"
                           >
                             이동
@@ -719,70 +726,66 @@ export const DeveloperVersionRegistrationSection = ({
                             <input
                               type="text"
                               required
-                              value={row.subVersion} // 서브버전(앱) 코드
+                              value={row.subVersion}
                               onChange={(e) => handleRowChange(index, "subVersion", e.target.value)}
-                              className="w-full rounded-md border border-slate-200 bg-white py-2.5 pl-3.5 pr-12 text-sm font-bold text-[#1a237e] focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all uppercase"
+                              className="w-full rounded-md border border-slate-200 bg-white py-2.5 pl-3.5 pr-12 text-sm font-bold text-[#1a237e] focus:ring-2 focus:ring-[#1a237e] outline-none uppercase"
                             />
-                            {/* 행 삭제 버튼 */}
                             <button
                               type="button"
                               onClick={() => removeRow(index)}
                               className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-red-500 font-bold"
-                              title="항목 삭제"
                             >
                               삭제
                             </button>
                           </div>
                         </div>
                       </td>
-                      {/* VERSION 열: 버전 태그 입력 */}
+                      {/* VERSION (Tag) */}
                       <td className="px-4 py-3 border-b border-slate-100">
                         <input
                           type="text"
                           required
-                          value={row.tag} // 버전명 (예: v1.2.3)
+                          value={row.tag}
                           onChange={(e) => handleRowChange(index, "tag", e.target.value)}
                           placeholder="예: v1.0.0"
-                          className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all"
+                          className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-bold text-slate-800 focus:ring-2 focus:ring-[#1a237e] outline-none"
                         />
                       </td>
-                      {/* IMAGE TAG 열: 도커 이미지 정보 입력 */}
+                      {/* IMAGE TAG (EXT일 경우 비활성화) */}
                       <td className="px-4 py-3 border-b border-slate-100">
                         <textarea
                           disabled={row.subVersion.trim().toUpperCase() === "EXT"}
-                          value={row.component} // 컴포넌트 정보 및 이미지 태그들
+                          value={row.component} 
                           onChange={(e) => handleRowChange(index, "component", e.target.value)}
                           placeholder={row.subVersion.trim().toUpperCase() === "EXT" ? "IMAGE TAG 없음" : "예: myapp-api:v2.0.27"}
-                          rows={2} // 멀티라인 지원 (CC의 경우 API/FE 두 줄)
-                          className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all font-mono resize-y min-h-[42px] disabled:bg-slate-100 disabled:text-slate-400 disabled:cursor-not-allowed"
+                          rows={2} 
+                          className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] outline-none font-mono resize-y min-h-[42px] disabled:bg-slate-100 disabled:text-slate-400"
                         />
                       </td>
-                      {/* NOTE 열: 해당 컴포넌트의 변경 사항 기록 */}
+                      {/* NOTE */}
                       <td className="px-4 py-3 border-b border-slate-100">
                         <textarea
-                          value={row.note} // 기록 텍스트
+                          value={row.note} 
                           onChange={(e) => handleRowChange(index, "note", e.target.value)}
                           onKeyDown={(e) => {
-                            // Shift 없이 Enter를 누르면 엔터키의 기본 동작(폼 제출)을 막음 (줄바꿈만 허용하기 위함이 아니라 텍스트박스 내부의 의도치 않은 폼제출 방지)
-                            if (e.key === "Enter" && !e.shiftKey) {
-                              e.preventDefault();
-                            }
+                            if (e.key === "Enter" && !e.shiftKey) e.preventDefault();
                           }}
                           placeholder="변경 사항 기록 (Shift+Enter 줄바꿈)"
-                          rows={2} // 멀티라인 지원
-                          className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] focus:border-transparent outline-none transition-all resize-y min-h-[42px]"
+                          rows={2} 
+                          className="w-full rounded-md border border-slate-200 bg-white py-2.5 px-3.5 text-base font-medium text-slate-800 focus:ring-2 focus:ring-[#1a237e] outline-none resize-y min-h-[42px]"
                         />
                       </td>
-                      {/* 상태 열: 배포 대기(pending), 업데이트(updated), 변동없음(unchanged) 선택 */}
+                      {/* STATUS (제어 드롭다운) */}
                       <td className="px-4 py-3 border-b border-slate-100">
                         <div className="relative w-full">
                           <select
-                            value={row.status} // 현재 상태값
+                            value={row.status} 
                             onChange={(e) => handleRowChange(index, "status", e.target.value)}
-                            className={`w-full appearance-none rounded-md border border-slate-200 py-2.5 pl-3.5 pr-8 text-sm font-bold outline-none transition-all ${row.status === "updated" ? "bg-[#0006661a] text-[#000666]" : // 파란색 강조 (updated)
-                              row.status === "pending" ? "bg-[#ffdbd0] text-[#7b2e12]" : // 붉은색 강조 (pending)
-                                "bg-slate-100 text-slate-500" // 회색 (unchanged)
-                              }`}
+                            className={`w-full appearance-none rounded-md border border-slate-200 py-2.5 pl-3.5 pr-8 text-sm font-bold outline-none ${
+                              row.status === "updated" ? "bg-[#0006661a] text-[#000666]" : 
+                              row.status === "pending" ? "bg-[#ffdbd0] text-[#7b2e12]" : 
+                              "bg-slate-100 text-slate-500" 
+                            }`}
                           >
                             <option value="updated" className="bg-white text-[#000666] font-bold">UPDATED</option>
                             <option value="pending" className="bg-white text-[#7b2e12] font-bold">PENDING</option>
@@ -791,55 +794,44 @@ export const DeveloperVersionRegistrationSection = ({
                           <ChevronDownIcon className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                         </div>
                       </td>
-                      {/* 저장 버튼은 입력 필드와 분리하여 행의 가장 오른쪽에 고정 배치 */}
+                      {/* 개별 행 저장 액션 버튼 (우측 고정) */}
                       <td className="sticky right-0 z-10 border-b border-slate-100 bg-white px-4 py-3 text-right shadow-[-1px_0_0_#e2e8f0] group-hover:bg-slate-50">
-                        {modeType === "edit" && (
-                          <button
-                            type="button"
-                            onClick={() => handleSaveRow(index)} // 서브버전 단건 저장 핸들러
-                            disabled={saving}
-                            className="whitespace-nowrap px-3 py-2 text-sm font-bold text-white bg-indigo-500 hover:bg-indigo-600 rounded-md transition-all shadow-sm active:scale-95 disabled:opacity-50"
-                          >
-                            저장
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleSaveRow(index)} 
+                          disabled={saving}
+                          className={`px-4 py-2 text-sm font-bold rounded-lg transition-all shadow-sm active:scale-95 whitespace-nowrap ${
+                            row.dirty 
+                              ? "bg-[#000666] text-white hover:bg-[#090d82]" 
+                              : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 hover:text-slate-700"
+                          } ${saving ? "opacity-50 cursor-not-allowed" : ""}`}
+                        >
+                          {saving ? "저장중" : (row.dirty ? "저장 필요" : "저장 완료")}
+                        </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-
-            {/* 테이블 하단 서브버전 추가 버튼 */}
-            <div className="p-4 bg-slate-50 border-t border-slate-100 flex justify-center">
-              <button
-                type="button"
-                onClick={addRow} // 새 행 추가 핸들러
-                className="flex items-center gap-2 px-8 py-3 bg-white border border-slate-200 hover:border-[#000666] hover:text-[#000666] text-slate-600 font-bold rounded-lg shadow-sm transition-all"
-              >
-                <span className="text-xl leading-none">+</span>
-                <span>빈 서브버전 항목 추가하기</span>
-              </button>
+              <div className="p-4 bg-slate-50/50 flex justify-center border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={addRow}
+                  className="py-2.5 px-6 flex items-center gap-2 text-sm font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-all"
+                >
+                  <span>+</span> 빈 컴포넌트 행 추가
+                </button>
+              </div>
             </div>
           </section>
         )}
-
-        {/* 제출 에러 발생 시 경고 메시지 영역 */}
-        {submitError && (
-          <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-base text-red-700">
-            {submitError}
-          </div>
-        )}
-
-
       </div>
 
-      {/* 전역적으로 사용되는 알림창 컴포넌트 */}
-      <AlertModal
-        isOpen={!!alertMessage}
-        message={alertMessage}
+      <AlertModal 
+        isOpen={!!alertMessage} 
+        message={alertMessage} 
         type={alertType}
-        onClose={() => setAlertMessage("")}
+        onClose={() => setAlertMessage("")} 
       />
     </div>
   );
