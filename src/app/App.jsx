@@ -1,6 +1,11 @@
 /*
 용어 정리 
-items : 버전 정보들의 묶음 
+items : 버전 정보들의 묶음 ex) items[0] = {versionName: "v1.0.0", versionDescription: "첫번째 버전", ...}
+append : 기존에 로딩된 버전 목록에 이어붙일지 여부, true면 이어붙임, false면 새로 로딩
+page : 현재 페이지 번호, 0부터 시작
+size : 한 페이지에 보여줄 버전 개수
+totalCount : 서버에 존재하는 전체 버전 개수
+hasMore : 서버에 더 많은 버전이 존재하는지 여부, true면 더 있음, false면 없음
 */
 
 //컴포넌트 내부의 값(상태)를 기억하고 값이 바뀌면 화면을 다시 랜더링하는 useState와 초기에 NCR과 Onedrive 연결 상태를 확인하는 useEffect import
@@ -125,35 +130,54 @@ export const HtmlBody = () => {
       setTotalVersionCount(totalCount);
       //더 불러올 페이지가 있는지 계산해서 현재 페이지 + 1이 전체 페이지보다 작으면 다음 페이지가 존재함을 확인 ex) 현 2페이지, 총 페이지 3페이지 2 + 1 < 3 만족을 안함으로 
       setHasMore((responsePage + 1) * responseSize < totalCount);
-    } catch (error) {
+    } catch (error) { // 오류 발생시 아래와 같은 에러 메시지 출력
       setVersionError(error.payload?.message || error.message || "메인버전 목록을 불러오는 중 오류가 발생했습니다.");
-    } finally {
+    } finally { //append(이어붙일지)의 유무에 따라 로딩화면 종료 
       if (append) setLoadingMoreVersions(false);
       else setLoadingVersions(false);
     }
   };
 
+  //배포자페이지에서 버전을 선택하세요. 클릭 후 버전목록이 끝까지 스크롤되면 loadMoreVersions 함수가 실행되어 다음 페이지의 버전들을 불러오게함
   const loadMoreVersions = () => {
     if (!hasMore || loadingMoreVersions) return;
+    //이어붙이기 위해 함수 재호출 및 true상태로 변경
     loadVersions(currentKeyword, page + 1, true);
   };
 
+
+  //검색어 입력 및 일치 확인 코드 
+
+  //searchVersionOptions 함수는 사용자가 입력한 검색어(keyword)를 받아서 서버에서 해당 검색어와 일치하는 버전들을 찾아 반환하는 비동기 함수(응답이 올때까지 기다림)
   const searchVersionOptions = async (keyword) => {
+
+    //trim으로 keyword의 앞뒤 공백 제거 후에 searchStr에 저장 
     const searchStr = typeof keyword === "string" ? keyword.trim() : "";
+
+    //검색어 없으면 그냥 versions return 
     if (!searchStr) return versions; 
 
+    //검색 결과를 저장할 results, 중복을 거르기위한 Set 집합의 loadedNames, 요청 페이지는 0으로 초기화 및 다음에 올 페이지는 true로 변경 
     const results = [];
     const loadedNames = new Set();
     let requestedPage = 0;
     let hasNextPage = true;
 
+    //while문을 사용해 hasNextPage가 true일때까지 반복 
     while (hasNextPage) {
+      //await 비동기 함수를 이용해 값을 받을때까지 계속 반복 
       const response = await listMainVersions(searchStr, requestedPage, VERSION_PAGE_SIZE);
+
+      //items에 배열이 있다면 가져오고 없거나 에러 발생시 빈 배열로 처리 
+      // ?. 는 옵셔널 체이닝으로 null, undefined가 될 경우에 에러 대신 undefined 으로 처리
       const items = response?.items || [];
+
+      //정상적인 숫자인지 확인 
       const responsePage = Number.isFinite(Number(response?.page)) ? Number(response.page) : requestedPage;
       const responseSize = Number.isFinite(Number(response?.size)) ? Number(response.size) : VERSION_PAGE_SIZE;
       const totalCount = Number.isFinite(Number(response?.totalCount)) ? Number(response.totalCount) : items.length;
 
+      //items를 하나씩 꺼내서 중복을 거르는 loadedNames에 없다면 results에 push 
       items.forEach((version) => {
         if (!loadedNames.has(version.versionName)) {
           loadedNames.add(version.versionName);
@@ -161,84 +185,113 @@ export const HtmlBody = () => {
         }
       });
 
+      //지금까지 본 개수가 totalCount보다 작다면 다음 페이지가 존재함을 확인하고 requestedPage를 증가시켜 다음 페이지를 요청
       hasNextPage = items.length > 0 && (responsePage + 1) * responseSize < totalCount;
       requestedPage = responsePage + 1;
     }
 
+    //while문이 끝나면 results(중복없는 결과물)를 반환 
     return results;
   };
 
+  //찾는 버전이나, 이미 버전이 있거나, 더 보여줄 다음 페이지가 없다면 종료하게하는 ensureVersionLoaded 함수 
   const ensureVersionLoaded = async (versionName) => {
     if (!versionName || versions.some((version) => version.versionName === versionName) || !hasMore) {
       return versions; 
     }
 
+    //원하는 버전이 나올때까지 다음 페이지를 탐색하는 setLoadingMoreVersions 함수 
     setLoadingMoreVersions(true);
     try {
-      let mergedVersions = [...versions];
-      let nextPage = page + 1;
-      let lastLoadedPage = page;
-      let lastPageSize = VERSION_PAGE_SIZE;
-      let serverTotalCount = totalVersionCount;
-      let targetFound = false;
+      //while 반복문을 돌면서 값이 계속 바뀌어야 되기 때문에(값 갱신) let 사용 
+      let mergedVersions = [...versions]; //현재 화면에 있던 데이터 복사 
+      let nextPage = page + 1; // 페이지 증가 
+      let lastLoadedPage = page; //방금 로딩된 페이지 번호 = 계속 갱신됨
+      let lastPageSize = VERSION_PAGE_SIZE; //버전 개수 = 계속 갱신됨
+      let serverTotalCount = totalVersionCount; //서버에 존재하는 전체 버전 개수 = 계속 갱신됨
+      let targetFound = false; //찾는 버전이 있는지? 
 
+      //찾는 버전이 없거나, 서버에 로딩할 페이지가 더 있다면 반복 
       while (!targetFound && (lastLoadedPage + 1) * lastPageSize < serverTotalCount) {
-        const response = await listMainVersions("", nextPage, VERSION_PAGE_SIZE);
+        //await 비동기 함수로 실제 값을 받아야 종료하게끔 함, 
+        const response = await listMainVersions("", nextPage, VERSION_PAGE_SIZE); 
+
+        //items에 배열이 있다면 가져오고 없거나 에러 발생시 빈 배열로 처리 
+        // ?. 는 옵셔널 체이닝으로 null, undefined가 될 경우에 에러 대신 undefined 으로 처리
         const items = response?.items || [];
+
+        //정상적인 숫자인지 확인
         const responsePage = Number.isFinite(Number(response?.page)) ? Number(response.page) : nextPage;
         const responseSize = Number.isFinite(Number(response?.size)) ? Number(response.size) : VERSION_PAGE_SIZE;
         serverTotalCount = Number.isFinite(Number(response?.totalCount)) ? Number(response.totalCount) : serverTotalCount;
 
+        //이전 버전 previousVersions들을 map(순회)하면서 versionName을 Set 집합으로 저장해 중복된 버전이 이어붙여지지 않도록 처리
+        //Set을 쓴 이유 : 중복된 값을 허용하지않고 특정 값이 존재하는지 빠르게 찾아볼 수 있기 때문에
         const loadedNames = new Set(mergedVersions.map((version) => version.versionName));
         mergedVersions = [
           ...mergedVersions,
           ...items.filter((version) => !loadedNames.has(version.versionName)),
         ];
-        
+        //some을 통해 단 하나라도 존재하는지 검사, 찾는다면 targetFound가 True가 되어서 while 탈출 
         targetFound = mergedVersions.some((version) => version.versionName === versionName);
+        //마지막로딩페이지 저장 
         lastLoadedPage = responsePage;
+        //마지막페이지크기 저장 
         lastPageSize = responseSize;
         nextPage = responsePage + 1;
 
+        //빈 배열이면 탈출 
         if (items.length === 0) break; 
       }
 
+      // 데이터 업데이트, 값 갱신 및 검색어 초기화 
       setVersions(mergedVersions);
       setPage(lastLoadedPage);
       setCurrentKeyword("");
       setTotalVersionCount(serverTotalCount);
+      // 전체 데이터 개수가 현재 로딩된 데이터보다 적다면 계속 업데이트 
       setHasMore((lastLoadedPage + 1) * lastPageSize < serverTotalCount);
+      //업데이트 배열 반환 
       return mergedVersions;
     } finally {
       setLoadingMoreVersions(false);
     }
   };
 
+  //외부 api인 NCR과 Onedrive 연결상태 확인 코드 
+
+  //연결 상태 State 기록 
   const [ncrStatus, setNcrStatus] = useState("checking");
   const [odStatus, setOdStatus] = useState("checking");
 
+  //처음 화면이 나타날때 useEffect으로 한번 실행 
   useEffect(() => {
-    let mounted = true; 
+    let mounted = true; //나중에 false 상태 변화로 let으로 선언
 
-    loadVersions('', 0, false);
+    loadVersions('', 0, false); //메인버전은 빈 채로 기존 목록에 덮어씌움
     
+    //NCR과 onedrive에 연결상태 확인 후 연결되면 connected, 연결 안되면 disconnected로 상태 변경
+    //then은 성공시 처리, catch는 실패시 처리하는 비동기 함수이고, 헬스체크 같은 백그라운드 작업이라 사용 
     registryHealth()
-      .then(() => mounted && setNcrStatus("connected"))
+      .then(() => mounted && setNcrStatus("connected")) 
       .catch(() => mounted && setNcrStatus("disconnected"));
       
     onedriveHealth()
       .then(() => mounted && setOdStatus("connected"))
       .catch(() => mounted && setOdStatus("disconnected"));
 
+    //화면 전환시나 종료시 UseEffect 종료
     return () => {
       mounted = false; 
     };
   }, []);
 
+  //화면 UI 배치 코드 
   return (
     <div className="flex min-h-screen bg-[#eef2f7] font-sans">
       <div className="flex-1 flex flex-col min-w-0">
         
+        //헤더 
         <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b border-[#e0e4ec] bg-white px-8 shadow-sm">
           <div className="flex items-center gap-4">
             <button 
@@ -317,6 +370,7 @@ export const HtmlBody = () => {
           </div>
         </header>
 
+        //에러 배너 
         <main className="flex-1 flex flex-col relative">
           {versionError && (
             <div className="mx-8 my-4 shrink-0 rounded-2xl border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700 shadow-sm">
