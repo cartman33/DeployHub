@@ -310,7 +310,7 @@ export const DeveloperVersionRegistrationSection = ({
   // loadBaseline이 useCallback으로 고정되어 있어 관련 값이 실제로 바뀔 때만 Effect가 다시 실행된다.
   useEffect(() => {
     if (modeType === "edit" && versions.length > 0) loadBaseline();
-  }, [modeType, versions.length, loadBaseline]);
+  }, [modeType, versions.length, loadBaseline]); //의존성 배열 이 안의 값 중 하나가 변경되면 첫번째 함수 다시 실행
 
   // APP별 정보 영역의 새로고침 버튼을 눌렀을 때 실행한다.
   const handleRefreshAppInfo = () => {
