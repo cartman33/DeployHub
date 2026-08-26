@@ -110,6 +110,7 @@ export const HtmlBody = () => {
         //이전 버전 previousVersions들을 map(순회)하면서 versionName을 Set 집합으로 저장해 중복된 버전이 이어붙여지지 않도록 처리
         //Set을 쓴 이유 : 중복된 값을 허용하지않고 특정 값이 존재하는지 빠르게 찾아볼 수 있기 때문에
         //이어붙일 items 중에서 이전에 로딩된 버전이 아닌 것만 필터링하여 새로운 배열 newItems 생성
+        const loadedVersionNames = new Set(previousVersions.map((version) => version.versionName));
         const newItems = items.filter((version) => !loadedVersionNames.has(version.versionName));
         // ... 전개 연산자로 previousVersions와 newItems 배열들을 합친 새로운 배열을 return 
         //새로운 배열로 계속 만드는 이유 : 1. 배포자페이지에서 버전들을 비교하기 위해 무한 스크롤 기능을 넣었기 때문에 2. 리액트에선 기존 배열에 추가한다고 화면이 새로고침되지 않아서 
