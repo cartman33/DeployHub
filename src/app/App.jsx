@@ -1,118 +1,128 @@
-// 화면 상태를 기억해주는 useState와, 화면이 켜지거나 꺼질 때 특정 작업을 시켜주는 useEffect를 가져옵니다.
+/*
+용어 정리 
+items : 버전 정보들의 묶음 
+*/
+
+//컴포넌트 내부의 값(상태)를 기억하고 값이 바뀌면 화면을 다시 랜더링하는 useState와 초기에 NCR과 Onedrive 연결 상태를 확인하는 useEffect import
 import { useState, useEffect } from "react";
-// 우리 앱의 3가지 핵심 화면(배포자 모드, 개발자 모드, JOB 관리 화면)을 가져옵니다.
+//화면을 구성하는 배포자, 개발자, Job 관리 기능별 컴포넌트 import 
 import { DeploymentPipelineDashboardSection } from "../features/deployer/DeploymentPipelineDashboardSection";
 import { DeveloperVersionRegistrationSection } from "../features/developer/DeveloperVersionRegistrationSection";
 import { JobManagementPage } from "../features/job/JobManagementPage";
-// 백엔드 서버와 데이터를 주고받을 때 쓰는 함수들을 가져옵니다.
+//api.js에서 백엔드와 통신할 api 함수 import (메인버전 리스트와 NCR, Onedrive 연결 체크함수) 
 import { listMainVersions, registryHealth, onedriveHealth } from "../services/api";
 
-// 텅 빈 배열을 바깥에 따로 만들어 둡니다.
-// 화면 안에서 []를 계속 새로 만들면 리액트가 "어? 데이터가 바뀌었네?" 하고 착각해서 화면을 헛고생하며 다시 그릴 수 있기 때문입니다.
+//버전 목록의 기본값을 빈 배열로 설정
 const defaultVersions = [];
 
-// 무한 스크롤을 할 때, 한 번에 서버에서 몇 개씩 데이터를 가져올지 정해둡니다.
+//한번에 가져올 버전의 개수를 20개로 설정
 const VERSION_PAGE_SIZE = 20;
 
-// 새로고침을 해도 사용자가 방금 전까지 보고 있던 탭(예: 개발자 모드)을 기억하기 위해 브라우저 저장소에 쓸 이름표(키)입니다.
+// 로컬 스토리지에 저장할 활성화된 네비게이션 키와 유효한 네비게이션 값들을 설정
 const ACTIVE_NAVIGATION_STORAGE_KEY = "deployHub.activeNavigation";
 const VALID_NAVIGATIONS = new Set(["deployer", "developer", "job_management"]);
 
-/**
- * 브라우저 저장소에서 사용자가 마지막으로 보던 탭이 어딘지 기억을 꺼내옵니다.
- */
+//이전에 보던 페이지를 기억하기 위한 함수
 const getInitialNavigation = () => {
   try {
     const savedNavigation = window.localStorage.getItem(ACTIVE_NAVIGATION_STORAGE_KEY);
-    // 혹시라도 이상한 글자가 저장되어 있으면 안전하게 '배포자 모드(deployer)'를 기본 화면으로 띄워줍니다.
     return VALID_NAVIGATIONS.has(savedNavigation) ? savedNavigation : "deployer";
-  } catch {
-    // 인터넷 방문 기록이 남지 않는 시크릿 모드 등에서는 에러가 날 수 있으므로, 이때도 기본 화면을 띄워줍니다.
+  } catch { //없거나 오류가 생기면 배포자 페이지로 return 
     return "deployer";
   }
 };
 
-/**
- * @component HtmlBody
- * @description 우리 앱의 가장 큰 뼈대(전체 화면)입니다.
- * 제일 위쪽에 공통 헤더 메뉴를 보여주고, 사용자가 탭을 누르면 그에 맞는 화면으로 쏙쏙 바꿔 끼워주는 역할을 합니다.
- * 
- * [데이터 흐름]
- * 여기서 서버에서 받아온 전체 '버전 목록' 데이터를 꽉 쥐고 있다가, 
- * 화면 아래에 있는 각 컴포넌트들(개발자, 배포자 모드)에게 필요한 데이터를 쏙쏙 나누어 줍니다.
- */
+//HtmlBody 컴포넌트 선언 및 외부 파일에서 가져다 쓸 수 있게 export
 export const HtmlBody = () => {
-  // 사용자가 현재 보고 있는 탭이 어디인지 기억하는 상태입니다.
+  //현재 사용자가 보고있는 페이지 기억, 
   const [activeNavigation, setActiveNavigation] = useState(getInitialNavigation);
   
-  // 서버에서 받아온 전체 버전 목록 데이터들을 담아두는 상자입니다.
+  //서버에서 받아온 버전 목록 데이터, 초기값은 defaultVersions로 설정
   const [versions, setVersions] = useState(defaultVersions);
   
-  // 여러 화면에서 공통으로 "지금 내가 콕 찍어서 선택한 버전 이름"이 무엇인지 기억합니다.
+  //사용자가 목록 중에서 특정 버전 선택시 버전의 이름을 문자열로 저장, 처음엔 빈 문자열
   const [selectedVersionName, setSelectedVersionName] = useState("");
   
-  // 처음에 화면이 켜지거나 검색할 때, 빙글빙글 도는 로딩 화면을 보여줄지 말지 결정합니다.
+  //서버에서 버전 목록을 가져오는 중인지 여부를 확인하는 상태, 초기값은 로딩중 (true)
   const [loadingVersions, setLoadingVersions] = useState(true);
   
-  // 무한 스크롤에 필요한 상태들입니다. (지금 몇 쪽을 보고 있는지, 뒤에 더 가져올 데이터가 남아있는지 등)
-  const [page, setPage] = useState(0); 
+  //현재 페이지 번호 저장 0부터 시작 
+  const [page, setPage] = useState(0);
+
+  //서버에서 더 많은 버전이 있는지 여부를 확인하는 상태, 초기값은 false 
   const [hasMore, setHasMore] = useState(false); 
+
+  //현재 검색 키워드 저장, 초기값은 빈 문자열
   const [currentKeyword, setCurrentKeyword] = useState(""); 
+
+  //서버에서 가져온 전체 버전 개수를 저장하는 상태, 초기값은 0
   const [totalVersionCount, setTotalVersionCount] = useState(0); 
   
-  // 무한 스크롤로 밑바닥에 닿아서 다음 페이지를 덧붙여 부를 때만 띄워주는 미니 로딩 상태입니다.
+  //서버에서 더 많은 버전을 가져오는 중인지 여부를 확인하는 상태, 초기값은 false
   const [loadingMoreVersions, setLoadingMoreVersions] = useState(false);
   
-  // 목록을 불러오다가 서버 에러가 났을 때 보여줄 빨간색 경고 문구입니다.
+
+  //버전 데이터를 불러오거나 처리할때 에러 발생시 에러 메세지 저장, 없으면 빈 문자열 저장
   const [versionError, setVersionError] = useState("");
 
-  // 사용자가 다른 탭(메뉴)을 누를 때마다, 그 기록을 브라우저에 몰래몰래 저장해 둡니다. (새로고침 방어용)
+//useEffect 컴포넌트가 처음 화면에 나타나거나 배열 안의 상태(activeNavigation)의 변할때마다 실행 
   useEffect(() => {
     try {
+      //현재 보고 있는 페이지나 페이지 위치를 로컬 스토리지에 저장
       window.localStorage.setItem(ACTIVE_NAVIGATION_STORAGE_KEY, activeNavigation);
     } catch {
-      // 무시
+      //시크릿모드 등 브라우저 설정에 따라 로컬 스토리지 접근이 제한될 경우 에러 발생을 막기 위해 catch문을 비워 에러 패스
     }
-  }, [activeNavigation]);
+  }, [activeNavigation]); //activeNavigation 상태가 변할때마다 실행
 
-  /**
-   * 서버에서 버전 목록을 가져와서 우리 화면(상태)에 척척 채워넣는 함수입니다.
-   * 
-   * @param {string} keyword - 검색할 단어
-   * @param {number} requestedPage - 불러올 페이지 번호
-   * @param {boolean} append - true면 기존 목록 밑에 덧붙이고(스크롤), false면 싹 지우고 새로 씁니다(새로고침).
-   */
+  //서버에서 버전을 로딩하기 위한 async 비동기 함수 기본값은 keyword(검색어)는 빈 문자열, requestedPage(요청할 페이지)는 0번, append(기존 목록에 이어붙일지 여부)는 false
   const loadVersions = async (keyword = "", requestedPage = 0, append = false) => {
+    //append가 true이면 기존목록에 이어붙일 수 있음 -> 무한 스크롤 가능 
     if (append) setLoadingMoreVersions(true);
+    //false면 처음 검색이나 페이지를 새로 열기 때문에 전체 로딩 상태를 true로 설정
     else setLoadingVersions(true);
+    //데이터 새로 불러오기 전 이전 요청에서 발생한 에러메시지 빈 문자열로 초기화
     setVersionError("");
 
     try {
+
+      //keyword가 string 문자열이 맞는지 확인 
       const searchStr = typeof keyword === "string" ? keyword : "";
-      // 백엔드 통신 함수(api.js)를 호출해서 데이터를 진짜로 받아옵니다.
+
+      //실제 서버에 데이터를 요청하는 listMainversions를 await 함수로 호출하여 response에 저장, 요청할 페이지와 한 페이지에 가져올 버전 개수도 함께 전달
+      //await 함수를 사용한 이유 : 실제 데이터 값을 받은 뒤에 다음 코드 실행을 위함 
       const response = await listMainVersions(searchStr, requestedPage, VERSION_PAGE_SIZE);
+
+      //items에 배열이 있다면 가져오고 없거나 에러 발생시 빈 배열로 처리 
+      // ?. 는 옵셔널 체이닝으로 null, undefined가 될 경우에 에러 대신 undefined 으로 처리 
       const items = response?.items || [];
       
-      // 혹시 서버가 이상한 값을 줘도 뻗지 않게 안전하게 숫자로 바꿔줍니다.
+      //페이지 번호와 페이지 개수, 데이터의 총 개수가 정상적인 숫자인지 확인 및 비정상일시 페이지 번호는 요청한 페이지로, 페이지 개수는 위에서 정한 상수 20개로, 데이터의 총 개수는 방금 받은 개수로 사용
       const responsePage = Number.isFinite(Number(response?.page)) ? Number(response.page) : requestedPage;
       const responseSize = Number.isFinite(Number(response?.size)) ? Number(response.size) : VERSION_PAGE_SIZE;
       const totalCount = Number.isFinite(Number(response?.totalCount)) ? Number(response.totalCount) : items.length;
 
+      //버전을 저장하는 상태를 변경하는 함수 setVersions, 이전버전 previousVersions를 받아 최신 상태로 유지
       setVersions((previousVersions) => {
-        // 새로고침 상황이면 새로 받아온 데이터로 싹 덮어씌웁니다.
+        //이어붙이기가 아닐 경우 (최초 로딩, 다른 버전 검색시) items를 반환해 새 데이터 보여주기 
         if (!append) return items;
 
-        // 무한 스크롤로 덧붙이는 상황일 때는 '똑같은 이름'이 혹시나 두 번 들어오지 않도록
-        // 겹치는 애들은 쏙쏙 빼고 새로운 애들만 밑에 이어붙여 줍니다. (중복 방지)
-        const loadedVersionNames = new Set(previousVersions.map((version) => version.versionName));
+        //이전 버전 previousVersions들을 map(순회)하면서 versionName을 Set 집합으로 저장해 중복된 버전이 이어붙여지지 않도록 처리
+        //Set을 쓴 이유 : 중복된 값을 허용하지않고 특정 값이 존재하는지 빠르게 찾아볼 수 있기 때문에
+        //이어붙일 items 중에서 이전에 로딩된 버전이 아닌 것만 필터링하여 새로운 배열 newItems 생성
         const newItems = items.filter((version) => !loadedVersionNames.has(version.versionName));
+        // ... 전개 연산자로 previousVersions와 newItems 배열들을 합친 새로운 배열을 return 
+        //새로운 배열로 계속 만드는 이유 : 1. 배포자페이지에서 버전들을 비교하기 위해 무한 스크롤 기능을 넣었기 때문에 2. 리액트에선 기존 배열에 추가한다고 화면이 새로고침되지 않아서 
         return [...previousVersions, ...newItems];
       });
       
+      //서버로 성공적으로 받아온 페이지 번호 저장 
       setPage(responsePage);
+      //서버로 성공적으로 받아온 검색어 저장 
       setCurrentKeyword(searchStr);
+      //서버에 존재하는 전체 데이터 개수 저장 
       setTotalVersionCount(totalCount);
-      // '지금까지 본 개수'보다 '서버에 있는 전체 개수'가 더 크면 아직 긁어올 데이터가 남았다는 뜻입니다.
+      //더 불러올 페이지가 있는지 계산해서 현재 페이지 + 1이 전체 페이지보다 작으면 다음 페이지가 존재함을 확인 ex) 현 2페이지, 총 페이지 3페이지 2 + 1 < 3 만족을 안함으로 
       setHasMore((responsePage + 1) * responseSize < totalCount);
     } catch (error) {
       setVersionError(error.payload?.message || error.message || "메인버전 목록을 불러오는 중 오류가 발생했습니다.");
@@ -122,28 +132,20 @@ export const HtmlBody = () => {
     }
   };
 
-  /**
-   * 화면 스크롤이 맨 바닥에 닿았을 때 "다음 페이지 가져와!" 하고 부르는 녀석입니다.
-   */
   const loadMoreVersions = () => {
-    // 더 가져올 데이터가 없거나 이미 부르고 있는 중이면 아무것도 안 하고 가만히 있습니다.
     if (!hasMore || loadingMoreVersions) return;
     loadVersions(currentKeyword, page + 1, true);
   };
 
-  /**
-   * 사용자가 드롭다운(선택창) 안에서 특정 글자로 검색을 했을 때 결과를 찾아주는 함수입니다.
-   */
   const searchVersionOptions = async (keyword) => {
     const searchStr = typeof keyword === "string" ? keyword.trim() : "";
-    if (!searchStr) return versions; // 검색어가 없으면 원래 목록을 그냥 줍니다.
+    if (!searchStr) return versions; 
 
     const results = [];
     const loadedNames = new Set();
     let requestedPage = 0;
     let hasNextPage = true;
 
-    // 검색창에서는 스크롤을 내리는 게 귀찮으니, 서버에 다음 페이지가 없을 때까지 끝까지 쭉 돌면서 데이터를 싹 다 긁어모읍니다.
     while (hasNextPage) {
       const response = await listMainVersions(searchStr, requestedPage, VERSION_PAGE_SIZE);
       const items = response?.items || [];
@@ -165,13 +167,9 @@ export const HtmlBody = () => {
     return results;
   };
 
-  /**
-   * 내가 지금 콕 찍어서 보려는 버전이 현재 화면에 안 보일 때(아직 스크롤을 안 내려서),
-   * 그 버전이 화면에 나타날 때까지 서버에서 다음 페이지들을 연속으로 알아서 불러주는 똑똑한 함수입니다.
-   */
   const ensureVersionLoaded = async (versionName) => {
     if (!versionName || versions.some((version) => version.versionName === versionName) || !hasMore) {
-      return versions; // 이미 화면에 있거나 더 부를 게 없으면 그냥 리턴합니다.
+      return versions; 
     }
 
     setLoadingMoreVersions(true);
@@ -183,7 +181,6 @@ export const HtmlBody = () => {
       let serverTotalCount = totalVersionCount;
       let targetFound = false;
 
-      // 내가 찾는 버전을 발견할 때까지 서버에 계속 다음 페이지를 달라고 조릅니다.
       while (!targetFound && (lastLoadedPage + 1) * lastPageSize < serverTotalCount) {
         const response = await listMainVersions("", nextPage, VERSION_PAGE_SIZE);
         const items = response?.items || [];
@@ -205,7 +202,6 @@ export const HtmlBody = () => {
         if (items.length === 0) break; 
       }
 
-      // 화면에 상태를 싹 다 업데이트 해줍니다.
       setVersions(mergedVersions);
       setPage(lastLoadedPage);
       setCurrentKeyword("");
@@ -217,40 +213,31 @@ export const HtmlBody = () => {
     }
   };
 
-  // 우측 상단에 떠 있는 외부 연동 서버들의 상태 불빛(초록/노랑/빨강)을 관리합니다.
   const [ncrStatus, setNcrStatus] = useState("checking");
   const [odStatus, setOdStatus] = useState("checking");
 
-  // 화면이 처음 인터넷 브라우저에 짠! 하고 나타날 때 딱 한 번만 실행되는 초기화 작업입니다.
   useEffect(() => {
-    // 만약 데이터가 오기도 전에 사용자가 뒤로 가기를 눌러버렸다면 에러가 날 수 있으니 
-    // "지금 이 화면이 켜져 있나요?" 하고 체크하는 안전장치입니다.
     let mounted = true; 
 
     loadVersions('', 0, false);
     
-    // 네이버 클라우드 서버가 살아있는지 찔러봅니다.
     registryHealth()
       .then(() => mounted && setNcrStatus("connected"))
       .catch(() => mounted && setNcrStatus("disconnected"));
       
-    // 원드라이브(SharePoint) 서버가 살아있는지 찔러봅니다.
     onedriveHealth()
       .then(() => mounted && setOdStatus("connected"))
       .catch(() => mounted && setOdStatus("disconnected"));
 
     return () => {
-      // 화면이 꺼질 때(다른 페이지로 넘어갈 때) 이 변수를 끄면서 정리를 해줍니다.
       mounted = false; 
     };
   }, []);
 
   return (
-    // 전체를 감싸는 회색 배경 도화지입니다.
     <div className="flex min-h-screen bg-[#eef2f7] font-sans">
       <div className="flex-1 flex flex-col min-w-0">
         
-        {/* 화면을 내려도 천장에 찰싹 붙어있는 공통 헤더 메뉴바 영역입니다. */}
         <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b border-[#e0e4ec] bg-white px-8 shadow-sm">
           <div className="flex items-center gap-4">
             <button 
@@ -264,7 +251,6 @@ export const HtmlBody = () => {
           </div>
 
           <div className="flex items-center gap-6">
-            {/* 탭 메뉴: 여기 버튼들을 누르면 activeNavigation 글자가 바뀌면서 아래 화면도 마술처럼 휙휙 바뀝니다. */}
             <div className="flex items-center gap-3">
               <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shadow-inner">
                 <button
@@ -298,7 +284,6 @@ export const HtmlBody = () => {
 
             <div className="h-6 w-px bg-slate-300"></div>
 
-            {/* 외부 서버들이 안녕한지 깜빡깜빡 알려주는 신호등 뱃지 영역입니다. */}
             <div className="flex items-center gap-2">
               <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${
                 ncrStatus === "connected" ? "bg-green-50 border-green-200" :
@@ -331,20 +316,13 @@ export const HtmlBody = () => {
           </div>
         </header>
 
-        {/* 탭 버튼을 눌렀을 때 실제로 화면이 갈아끼워지는 메인 무대입니다. */}
         <main className="flex-1 flex flex-col relative">
-          {/* 목록을 가져오다 실패하면 보여주는 빨간색 안내창입니다. */}
           {versionError && (
             <div className="mx-8 my-4 shrink-0 rounded-2xl border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700 shadow-sm">
               {versionError}
             </div>
           )}
           
-          {/* 
-            자, 여기서 마술이 일어납니다.
-            activeNavigation이 뭐냐에 따라 아래 3가지 화면 중 딱 하나만 화면에 띄워줍니다.
-            그리고 "옛다, 데이터!" 하면서 자식 화면들에게 필요한 버전 목록이나 함수들을 넘겨줍니다. (이걸 프롭스(Props)라고 부릅니다)
-          */}
           {activeNavigation === "deployer" ? (
             <DeploymentPipelineDashboardSection 
               versions={versions}
