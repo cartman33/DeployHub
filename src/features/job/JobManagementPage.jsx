@@ -1,47 +1,82 @@
+//Job 관리 페이지 
+
+/*
+용어 정리 
+source : 에러 객체 정보 모음  
+*/
+
 import { Fragment, useState, useEffect, useRef, useCallback } from "react";
 import { listPackageJobs, getPackageJob, deletePackage, runAdminCleanup, retryPackageJob } from "../../services/api";
 
+//Done이거나 Failed 일때만 삭제 가능 
 const PACKAGE_DELETE_ALLOWED_STATUSES = new Set(["DONE", "FAILED"]);
 
+//digest 불일치(E-0603) 에러 발생시 재시도 차단 => 이미지 태그 다시 세팅 , digest는 해시값으로 같은 버전명이여도 해시값이 다를 수도 있기 때문에
 const NON_AUTOMATIC_RETRY_CODES = new Set(["E-0603"]);
 
+//에러 객체들 E-xxxx 형태의 에러 코드만 검색하는 함수 
 const getErrorCode = (source) => {
   const directCode = source?.errorCode || source?.code;
+  //정규식 테스트, 테스트에 해당하는 에러 코드가 있다면 directCode로 return 
   if (typeof directCode === "string" && /^E-\d{4}$/.test(directCode)) return directCode;
 
+  //위의 정규식을 통과하지 못한 에러 코드들은 다음과 같은 payload에 있을 확률이 높음
   const candidates = [source?.errorMessage, source?.message, source?.payload?.errorCode, source?.payload?.code, source?.payload?.message];
   for (const value of candidates) {
+    //값이 비어있거나 string이 아니라면 continue 
     if (typeof value !== "string") continue;
+    //글자와 혼합되어 있는 에러코드를 찾기 위해 ^,$ 제외 정규식 테스트 
     const matched = value.match(/E-\d{4}/);
+    //결과물 반환 matched[0]은 정규식에 매칭된 첫번째 결과물
     if (matched) return matched[0];
   }
+  //그럼에도 없으면 빈 문자열 반환 
   return "";
 };
 
+//에러 발생 분류 함수 
+//item과 작업 상태를 getFailureStage에 받음 
 const getFailureStage = (item, jobStatus) => {
+
+  //getErrorCode 호출 => E-xxxx 형태로
   const code = getErrorCode(item);
+  //에러 메시지도 포함 
   const message = item?.errorMessage || "";
   
+  //각각의 에러 코드 정규식에 따라 분류 
+
+  //업로드 에러 
   if (/^E-11/.test(code) || /^E-045[1-3]$/.test(code) || (code === "E-0604" && message.includes("업로드"))) {
     return { key: "UPLOAD", label: "업로드", className: "border-violet-200 bg-violet-50 text-violet-700" };
   }
+
+  //다운로드 에러 
   if (/^E-06/.test(code)) {
     return { key: "DOWNLOAD", label: "다운로드", className: "border-sky-200 bg-sky-50 text-sky-700" };
   }
+
+  //검증 에러 
   if (/^E-05/.test(code)) {
     return { key: "VALIDATION", label: "검증", className: "border-amber-200 bg-amber-50 text-amber-700" };
   }
+
+  //외부 연동 에러 
   if (/^E-04/.test(code)) {
     return { key: "EXTERNAL", label: "외부 연동", className: "border-orange-200 bg-orange-50 text-orange-700" };
   }
+
+  //Failed해서 끝났는데 Pending 상태인 경우 미확인으로 처리 
   if (jobStatus === "FAILED" && item?.status === "PENDING") {
     return { key: "UNKNOWN", label: "미확인", className: "border-red-200 bg-red-50 text-red-700" };
   }
+  //위 조건에 아무것도 맞지 않다면 기본값 반환 -> 실패한 item -> 처리 , 정상 -> -
   return { key: "UNKNOWN", label: item?.status === "FAILED" ? "처리" : "-", className: "border-slate-200 bg-slate-50 text-slate-600" };
 };
 
+//에러 코드 제외 후 원인 설명을 위한 함수 
 const getErrorDescription = (item) => (item?.errorMessage || "").replace(/^E-\d{4}\s*:\s*/, "");
 
+//byte를 읽기 쉬운 gb,mb,kb로 변환하는 함수 
 const formatFileSize = (bytes) => {
   if (!Number.isFinite(Number(bytes)) || Number(bytes) <= 0) return "-";
   const value = Number(bytes);
