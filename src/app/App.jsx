@@ -291,7 +291,7 @@ export const HtmlBody = () => {
     <div className="flex min-h-screen bg-[#eef2f7] font-sans">
       <div className="flex-1 flex flex-col min-w-0">
         
-        //헤더 
+        {/* 전체 모드 선택과 외부 서비스 연결 상태를 보여주는 헤더 */}
         <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b border-[#e0e4ec] bg-white px-8 shadow-sm">
           <div className="flex items-center gap-4">
             <button 
@@ -370,7 +370,7 @@ export const HtmlBody = () => {
           </div>
         </header>
 
-        //에러 배너 
+        {/* 메인버전 목록 조회 중 오류가 발생했을 때만 표시하는 에러 배너 */}
         <main className="flex-1 flex flex-col relative">
           {versionError && (
             <div className="mx-8 my-4 shrink-0 rounded-2xl border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700 shadow-sm">
