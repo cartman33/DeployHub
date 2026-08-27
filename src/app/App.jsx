@@ -290,8 +290,6 @@ export const HtmlBody = () => {
   return (
     <div className="flex min-h-screen bg-[#eef2f7] font-sans">
       <div className="flex-1 flex flex-col min-w-0">
-        
-        //헤더 
         <header className="sticky top-0 z-40 flex h-16 w-full items-center justify-between border-b border-[#e0e4ec] bg-white px-8 shadow-sm">
           <div className="flex items-center gap-4">
             <button 
@@ -369,8 +367,6 @@ export const HtmlBody = () => {
             </div>
           </div>
         </header>
-
-        //에러 배너 
         <main className="flex-1 flex flex-col relative">
           {versionError && (
             <div className="mx-8 my-4 shrink-0 rounded-2xl border border-red-200 bg-red-50 px-6 py-4 text-sm text-red-700 shadow-sm">

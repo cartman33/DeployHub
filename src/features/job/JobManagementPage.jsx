@@ -2,7 +2,15 @@
 
 /*
 용어 정리 
-source : 에러 객체 정보 모음  
+source : 에러 객체 정보 모음
+statusFilter : 우측 상단 필터 값 (ALL, PENDING, DONE, FAILED 등)
+
+api 통신 함수 
+listPackageJobs : 서버에서 Job 전체 목록을 가져오는 함수
+getPackageJob   : 특정 Job의 상세 정보(파일 목록, 에러 내역 등)를 가져오는 함수
+deletePackage   : 특정 Job의 패키지 산출물을 스토리지에서 삭제 요청하는 함수
+runAdminCleanup : 보존 기한이 만료된 오래된 패키지들을 일괄 정리(삭제)하는 함수
+retryPackageJob : 실패한 Job 항목에 대해 서버에 재시도를 요청하는 함수
 */
 
 import { Fragment, useState, useEffect, useRef, useCallback } from "react";
@@ -86,12 +94,18 @@ const formatFileSize = (bytes) => {
   return `${value} B`;
 };
 
+//sharepoint url를 복사 함수 
+//copyText라는 비동기 함수 생성 
 const copyText = async (text) => {
+  //복사할 게 없다면 false를 return 
   if (!text) return false;
   try {
+    //최신 브라우저에서 지원하는 복사 방식을 먼저 시도 
     await navigator.clipboard.writeText(text);
     return true;
   } catch {
+    //구형 브라우저에서 지원하는 복사 방식을 최신 방식 실패시 시도 
+    //textarea를 생성하고 body에 붙인 후 select()로 선택하고 execCommand("copy")로 복사 후 제거
     const textArea = document.createElement("textarea");
     textArea.value = text;
     textArea.style.position = "fixed";
@@ -99,32 +113,44 @@ const copyText = async (text) => {
     document.body.appendChild(textArea);
     textArea.select();
     const copied = document.execCommand("copy");
+    //복사가 끝나면 textArea 삭제 
     textArea.remove();
     return copied;
   }
 };
 
+//Job 관리 페이지 컴포넌트 
 export const JobManagementPage = () => {
+  //페이지 전체 목록 상태 
   const [jobs, setJobs] = useState([]);
-  const [statusFilter, setStatusFilter] = useState("ALL");
-  const [loading, setLoading] = useState(true);
+  const [statusFilter, setStatusFilter] = useState("ALL"); //성공, 실패, 진행중 상태 
+  const [loading, setLoading] = useState(true); //로딩중 여부 
   const [error, setError] = useState("");
   
+  //재시도 상태
   const [retryingVersionName, setRetryingVersionName] = useState("");
   
+  //상세정보 상태 
   const [expandedVersionName, setExpandedVersionName] = useState("");
   const [expandedJobDetail, setExpandedJobDetail] = useState(null);
   
+  //상세정보 로딩, UI 상태 (펼쳐진 상세정보)
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState("");
   const [copied, setCopied] = useState(false);
 
+  //옵셔널 체이닝 ?.를 사용해 items를 안전하게 꺼내옴
   const expandedItems = expandedJobDetail?.items || [];
+
+  //작업 실패시 실패원인이 데이터에 있는지 확인하는 함수 
   const failureDetailsMissing = expandedJobDetail?.job?.status === "FAILED"
+  //some을 통해 하나도 없다면 true 
     && !expandedItems.some((item) => getErrorCode(item) || item.errorMessage);
 
+  //컴포넌트 마운트 상태 추적 (화면 랜더링 확인용)
   const isMounted = useRef(true);
 
+  //컴포넌트 생명주기, 화면이 나타나면 true, 페이지 이동이나 화면이 없어지면 false 
   useEffect(() => {
     isMounted.current = true;
     return () => {
@@ -132,127 +158,177 @@ export const JobManagementPage = () => {
     };
   }, []);
 
+
+  //서버에서 Job 목록을 가져오는 함수
+  //fecthJobs라는 비동기 함수 생성 
+  //useCallback은 불필요한 재랜더링을 막기 위함 
   const fetchJobs = useCallback(async () => {
+    //로딩상태 
     setLoading(true);
     setError("");
     try {
+      //필터 조건 생성 , ALL이면 전부, sucess나 failed라면 해당 글자를 넘겨 필터링 
       const statusParam = statusFilter === "ALL" ? undefined : statusFilter;
+
+      //api.js에서 listPackageJobs를 호출하고 서버와 통신해 await 함수를 통해 실제 데이터를 받을때까지 대기 받으면 data에 넣음 
       const data = await listPackageJobs(statusParam);
       
+      //받은 데이터형식을 배열에 안전하게 저장 
       const jobList = Array.isArray(data) ? data : (data?.items || []);
       
+      //현재 페이지에서 잘 보여지고 있는지 확인
       if (isMounted.current) {
         setJobs(jobList);
       }
+      //에러 발생시 에러메시지 출력
     } catch (err) {
       if (isMounted.current) {
         setError(err.payload?.message || err.message || "Job 목록을 불러오는데 실패했습니다.");
       }
     } finally {
+      //성공이던 실패던 로딩은 false로 종료 
       if (isMounted.current) {
         setLoading(false);
       }
     }
+    //필터 sucess, failed, all에 맞춰서 새로고침 
   }, [statusFilter]);
 
+  //페이지가 처음 렌더링될 때 fetchJobs를 호출하여 Job 목록을 가져옴 => 필터를 조건을 바꿀때마다 fetchJobs이 갱신되고 useEffect으로 화면 갱신 
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
 
+  //상세정보 열기, 닫기 토글 함수 
   const handleToggleDetails = async (versionName) => {
     setCopied(false);
     if (expandedVersionName === versionName) {
       setExpandedVersionName("");
       setExpandedJobDetail(null);
       setDetailError("");
-      return;
+      return; //함수는 여기서 끝 
     }
 
+    //상세정보 열기 
     setExpandedVersionName(versionName);
     setExpandedJobDetail(null);
     setDetailError("");
     setDetailLoading(true);
     try {
+      //안전하게 api 통신 시작 Job의 versionName을 보내 상세정보를 불러옴
       const detail = await getPackageJob(versionName);
+      //성공시 detail 
       if (isMounted.current) setExpandedJobDetail(detail);
     } catch (err) {
+      //에러 발생시 에러 메시지 출력 
       if (isMounted.current) setDetailError(err.payload?.message || err.message || "JOB 상세 정보를 불러오지 못했습니다.");
     } finally {
+      //성공이던 실패던 로딩중 종료 
       if (isMounted.current) setDetailLoading(false);
     }
   };
 
+  //상세정보와 전체 Job 목록 새로고침 함수
   const handleRefreshJobs = async () => {
+    //UI 변화 방지 
     const versionNameToRefresh = expandedVersionName;
+    //전체 목록과 상세정보 새로고침 동시 진행 
     if (versionNameToRefresh) {
       setDetailLoading(true);
       setDetailError("");
     }
 
+    //Promise.allSettled를 사용하여 fetchJobs(전체 Job 목록)와 getPackageJob(해당 Job 상세정보)을 동시에 실행하고, 각각의 결과를 배열로 받음
     const [, detailResult] = await Promise.allSettled([
       fetchJobs(),
       versionNameToRefresh ? getPackageJob(versionNameToRefresh) : Promise.resolve(null),
     ]);
 
+    //페이지 이동시 return으로 새로고침 함수 종료 
     if (!isMounted.current || !versionNameToRefresh) return;
     
+    //Promise.allSettled 성공시 상태 fulfilled 
     if (detailResult.status === "fulfilled") {
+      //최신데이터를 화면상태(setExpandedJobDetail)로 업데이트
       setExpandedJobDetail(detailResult.value);
     } else {
+      //아니라면 에러메시지 출력 
       const err = detailResult.reason;
       setDetailError(err?.payload?.message || err?.message || "JOB 상세 정보를 새로고침하지 못했습니다.");
     }
     setDetailLoading(false);
   };
 
+  //사용자가 URL 복사 버튼 클릭(event)시 실행되는 비동기 handleCopyResults 함수 
   const handleCopyResults = async (event) => {
     event.stopPropagation();
-    const detail = expandedJobDetail;
+    //detail에 Job의 상세 정보를 담음 
+    const detail = expandedJobDetail; 
     const urls = [
+      //?.으로 sharepoint 폴더 url로 안전하게 가져오기 
       detail?.job?.spFolderUrl,
+      //item배열에서 map으로 fileUrl만 뽑아냄 
       ...(detail?.items || []).map((item) => item.fileUrl),
+      //filter(Boolean)로 null, undefined, 빈 문자열 제거
     ].filter(Boolean);
     
+    //url없으면 함수 종료 
     if (urls.length === 0) return;
     
+    //줄바꿈 기호 넣어서 한번에 긴 url로 만듬 
+    //copyText 함수 호출해 복사 
     if (await copyText(urls.join("\n"))) {
+      //성공시 true
       setCopied(true);
+      //1.8초 후에 다시 false로 timeout 
       window.setTimeout(() => setCopied(false), 1800);
     }
   };
 
+  //삭제 버튼 클릭시 Job 패키지 삭제, versionName과 status를 매개변수로 받아 처리 
   const handleDelete = async (versionName, status) => {
+    //진행중인 패키지를 걸러내기 위한 if문 , 조건에 걸리면 경고문 출력
     if (!PACKAGE_DELETE_ALLOWED_STATUSES.has(status)) {
       alert("진행 중인 Job의 패키지 산출물은 삭제할 수 없습니다.");
       return;
     }
     
+    //사용자 확인, 삭제 버튼 클릭시 경고창
     if (!window.confirm(`[${versionName}]의 패키지 산출물 파일을 삭제하시겠습니까?\nJob 이력은 삭제되지 않습니다.`)) {
       return;
     }
     
+    //실제 삭제 시작 
     try {
       await deletePackage(versionName);
       alert("패키지 산출물이 삭제되었습니다. Job 이력은 유지됩니다.");
+      //삭제시 fetchJobs 호출로 Job 목록 새로고침
       fetchJobs();
+      //실패시 에러메시지 출력 
     } catch (err) {
       alert(err.payload?.message || err.message || "패키지 산출물 삭제 중 오류가 발생했습니다.");
     }
   };
 
+  //실패한 Job 항목 비동기 재시도 함수, versionName을 매개변수로 받아 처리
   const handleRetry = async (versionName) => {
     setRetryingVersionName(versionName);
     try {
+      //상세정보가 이미 펼쳐져 있고 expandedJobDetail이 존재하면 그대로 사용, 아니면 getPackageJob 호출 => 캐싱 활용
       const detail = expandedVersionName === versionName && expandedJobDetail
         ? expandedJobDetail
         : await getPackageJob(versionName);
         
+      //재시도 항목 대상들 걸러내기 
       const failedItems = (detail?.items || []).filter((item) => item.status === "FAILED" && item.imageTag);
       const retryItems = failedItems.filter((item) => !NON_AUTOMATIC_RETRY_CODES.has(getErrorCode(item)));
       
+      //걸러낸 대상들 중의 imageTag만 map으로 추출 및 다시 retryImageTags 배열로 만듬 
       const retryImageTags = [...new Set(retryItems.map((item) => item.imageTag))];
+      //걸러진 대상들은 blockedItems에 모아서 사용자에게 전달 
       const blockedItems = failedItems.filter((item) => NON_AUTOMATIC_RETRY_CODES.has(getErrorCode(item)));
 
+      //재시도 가능한 ImageTags가 없다면 에러메시지 출력 
       if (retryImageTags.length === 0) {
         const blockedMessage = blockedItems.length > 0
           ? "digest 불일치(E-0603)는 자동 재시도 대상이 아닙니다. 메인버전의 IMAGE TAG를 다시 확정해주세요."
@@ -261,41 +337,57 @@ export const JobManagementPage = () => {
         return;
       }
 
+      //재시도 요약 정리 reduce 함수 , item을 돌면서 counts 안에 집어넣음 
       const stageCounts = retryItems.reduce((counts, item) => {
         const stage = getFailureStage(item).label;
         counts[stage] = (counts[stage] || 0) + 1;
         return counts;
       }, {});
+
+      //빌드 N건, 배포 N건을 보여주기 위한 문자열 생성 및 출력 
       const stageSummary = Object.entries(stageCounts).map(([stage, count]) => `${stage} ${count}건`).join(", ");
+      //blockedItems가 있다면 E-0603 N건은 자동 재시도에서 제외됩니다. 출력
       const blockedNotice = blockedItems.length > 0 ? `\nE-0603 ${blockedItems.length}건은 자동 재시도에서 제외됩니다.` : "";
       
+      //재시도 요약, 빌드,배포 건수, 재시도 제외 한번에 confirm으로 출력 
       if (!window.confirm(`[${versionName}] 실패 항목 ${retryImageTags.length}건만 재시도합니다.\n${stageSummary}${blockedNotice}\n\n계속하시겠습니까?`)) {
         return;
       }
 
+      //재시도 요청 및 예외처리 
       try {
+        //await 함수를 통해 요청 및 응답 대기 
         await retryPackageJob(versionName, { imageTags: retryImageTags, force: false });
         alert(`실패 항목 ${retryImageTags.length}건의 재시도 요청이 접수되었습니다.`);
       } catch (err) {
+        //실패시 getErrorCode를 얻고 
         const errorCode = getErrorCode(err);
         
+        //409에러나 E-0703(작업디렉터리 소실)에러가 아니라면 err를 던짐 
         if (err.status !== 409 || errorCode !== "E-0703") throw err;
 
+        //E-0703 에러시 출력 
         const forceConfirmed = window.confirm(
           "작업 디렉터리가 소실되어 실패 항목만 재시도할 수 없습니다.\n\n전체 IMAGE TAG를 다시 수집하는 강제 재시도를 진행하시겠습니까?"
         );
+        //재시도 안하고 종료 
         if (!forceConfirmed) return;
 
+        //재시도 요청 성공시 성공 메시지 출력
         await retryPackageJob(versionName, { imageTags: [], force: true });
         alert("강제 전체 재수집 요청이 접수되었습니다.");
       }
 
+      //재시도 요청 성공 이후 화면 업데이트 
+      //전체 Job 목록을 불러옴 
       await fetchJobs();
       if (expandedVersionName === versionName) {
+        //상세 정보들도 업데이트 요청 
         const refreshedDetail = await getPackageJob(versionName);
         if (isMounted.current) setExpandedJobDetail(refreshedDetail);
       }
     } catch (err) {
+      //실패시 에러코드 출력 
       const errorCode = getErrorCode(err);
       const prefix = errorCode ? `[${errorCode}] ` : "";
       alert(`${prefix}${err.payload?.message || err.message || "재시도 요청 중 오류가 발생했습니다."}`);
@@ -304,25 +396,31 @@ export const JobManagementPage = () => {
     }
   };
 
+  //패키지 일괄 정리 함수 
   const handleCleanup = async () => {
     try {
+      //dry run으로 정리 요청 후 몇 개나 지워지는지 목록을 추출해서 먼저 봉줌 
       const dryResult = await runAdminCleanup(true);
       const localCount = dryResult?.localCleaned?.length || 0;
       const spCount = dryResult?.sharePointCleaned?.length || 0;
       
+      //지워질게 없다면 메시지 출력 후 return 종료
       if (localCount === 0 && spCount === 0) {
         alert("정리할 보존 기한 만료 패키지가 없습니다.");
         return;
       }
 
+      //지워질게 있다면 구체적인 안내 메시지 출력 및 confirm으로 확인창 띄우기 
       const msg = `정리 대상이 발견되었습니다.\n- 로컬 정리 대상: ${localCount}건\n- SharePoint 정리 대상: ${spCount}건\n\n정말로 스토리지 정리를 실행하시겠습니까?`;
       if (!window.confirm(msg)) {
         return;
       }
 
+      //실제로 삭제 
       await runAdminCleanup(false);
       alert("일괄 정리가 성공적으로 완료되었습니다.");
       fetchJobs();
+      //삭제 중 에러 발생시 메시지 출력 
     } catch (err) {
       alert(err.payload?.message || err.message || "정리 배치 실행 중 오류가 발생했습니다.");
     }
