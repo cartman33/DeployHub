@@ -1,0 +1,122 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: deployhub
+
+  # NCR/Graph 호출이 무기한 대기하지 않도록 한다 — 없으면 StartupChecks가 VPC 오설정 시
+  # 무한 대기하고, health endpoint 하나가 워커 스레드를 영구 점유할 수 있다.
+  http:
+    client:
+      connect-timeout: 5s
+      read-timeout: 10s
+
+  datasource:
+    url: jdbc:mysql://${DB_HOST:localhost}:${DB_PORT:3306}/${DB_NAME:deployhub}?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Seoul
+    username: ${DB_USERNAME:deployhub}
+    password: ${DB_PASSWORD:deployhub}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      # 스키마는 Flyway가 관리한다. Hibernate는 검증만 수행하고 DDL을 생성하지 않는다.
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+deployhub:
+  work-dir: ${WORK_DIR:/data/deployhub/jobs}
+
+  # 기동 시 NCR 도달성을 확인한다(StartupChecks). 실제 키/네트워크 없이 Swagger만 보려면
+  # `dev` 프로필(application-dev.yml)로 끌 것 — 기본값은 항상 true.
+  startup-checks:
+    enabled: ${STARTUP_CHECKS_ENABLED:true}
+  cors:
+    # 프론트엔드가 별도 오리진에서 호출한다. 쉼표로 여러 값 허용.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
+
+  # NCP Container Registry. Public Endpoint라 아웃바운드 443만 열리면 도달 가능하다.
+  # 인증은 Access Key Id/Secret Key Basic (docker login과 같은 자격 증명).
+  registry:
+    endpoint: ${NCR_ENDPOINT:}
+    access-key: ${NCR_ACCESS_KEY:}
+    secret-key: ${NCR_SECRET_KEY:}
+    cli-path: ${NCR_CLI_PATH:/usr/bin/skopeo}
+    # 서브버전 등록 시 image_tag가 레지스트리에 실제로 있는지 확인해 없으면 거부한다(E-0206).
+    # 배포 파이프라인이 이미지를 올린 뒤 버전 히스토리를 적는 순서라서 "없음 = 오타"로 볼 수 있다.
+    # 레지스트리에 닿을 수 없는 환경(더미 자격증명·사내망 차단)에서만 끈다.
+    verify-on-register: ${REGISTRY_VERIFY_ON_REGISTER:true}
+
+  # Microsoft Graph / OneDrive. SP_DRIVE_ID를 비우면 로그인한 계정의 기본 드라이브를 조회해 쓴다.
+  # 위임(delegated) 인증에서는 client-secret·site-id를 쓰지 않는다(app-only 복귀 대비로만 남김).
+  sharepoint:
+    tenant-id: ${GRAPH_TENANT_ID:}
+    client-id: ${GRAPH_CLIENT_ID:}
+    client-secret: ${GRAPH_CLIENT_SECRET:}
+    site-id: ${SP_SITE_ID:}
+    drive-id: ${SP_DRIVE_ID:}
+    root-path: ${SP_ROOT_PATH:/Deploy/Packages}
+    # 위임 인증용 refresh token 보관 파일. 최초 1회 device code 흐름으로 채워 넣는다.
+    # work-dir '밖'에 둔다 — work-dir은 운영자가 반입 tar를 꺼내 가는 곳이라, 그 안에 두면
+    # rsync/tar에 장기 자격증명이 조용히 딸려 나간다. 경로는 생성자에서 normalize된다.
+    refresh-token-file: ${GRAPH_REFRESH_TOKEN_FILE:${deployhub.work-dir}/../.graph-refresh-token}
+
+  # 모든 외부 호출(NCR·Graph)이 공유하는 재시도 정책.
+  retry:
+    max-retries: ${MAX_RETRY:3}
+    backoff: ${RETRY_BACKOFF:5s,15s,45s}
+
+  # Job 오케스트레이션. min-free-disk-bytes는 확정 시점의 경고 기준(기본 50GiB)일 뿐이고,
+  # 실제 필요 용량은 다운로드 단계가 매니페스트 크기로 따로 판정한다.
+  job:
+    concurrency: ${JOB_CONCURRENCY:3}
+    min-free-disk-bytes: ${MIN_FREE_DISK_BYTES:53687091200}
+
+  # 매니페스트 조회 동시 요청 상한. manifestExecutor 풀 크기와 검증 배치 크기가 이 값 하나를
+  # 공유한다(NCR 전체가 나눠 쓰는 전역 상한). 튜닝 대상이 아니라 placeholder를 두지 않았을 뿐,
+  # relaxed binding으로 DEPLOYHUB_MANIFEST_CONCURRENCY 덮어쓰기는 여전히 가능하다.
+  manifest:
+    concurrency: 5
+
+  # 다운로드. downloadExecutor 풀 크기가 JOB_CONCURRENCY × download.concurrency다.
+  download:
+    concurrency: ${DOWNLOAD_CONCURRENCY:3}
+    skopeo-timeout: ${SKOPEO_TIMEOUT:1800}
+
+  # 업로드. 320 KiB(327680)의 배수여야 한다 — 아니면 UploadChunkSizeValidator가 기동을 막는다.
+  upload:
+    chunk-size: ${UPLOAD_CHUNK_SIZE:10485760}
+    # 청크 PUT·업로드 세션 조회 전용 타임아웃(단위 없으면 초). spring.http.client.read-timeout(10초)은
+    # JDK 클라이언트에서 바디 전송까지 포함한 요청 전체의 데드라인이라 10 MiB 청크에 그대로 쓰면
+    # 지속 8.4 Mbps 미만에서 무조건 끊긴다. 300초면 하한이 약 0.27 Mbps가 된다.
+    request-timeout: ${UPLOAD_REQUEST_TIMEOUT:300s}
+
+  # 보존·정리 배치. days/count는 SharePoint 폴더에, local-cleanup-delay-hours는
+  # 중계 서버 작업 디렉터리에 적용된다.
+  retention:
+    days: ${RETENTION_DAYS:90}
+    count: ${RETENTION_COUNT:10}
+    local-cleanup-delay-hours: ${LOCAL_CLEANUP_DELAY_HOURS:24}
+    cron: "0 0 3 * * *"
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: alpha
+    display-request-duration: true
+
+logging:
+  level:
+    com.deployhub: INFO
