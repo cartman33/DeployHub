@@ -147,7 +147,7 @@ export const JobManagementPage = () => {
   //some을 통해 하나도 없다면 true 
     && !expandedItems.some((item) => getErrorCode(item) || item.errorMessage);
 
-  //컴포넌트 마운트 상태 추적 (화면 랜더링 확인용)
+  //컴포넌트 마운트 상태 추적 (화면 랜더링 확인용) 페이지가 벗어났나 확인
   const isMounted = useRef(true);
 
   //컴포넌트 생명주기, 화면이 나타나면 true, 페이지 이동이나 화면이 없어지면 false 

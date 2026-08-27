@@ -20,6 +20,7 @@ export const DeveloperVersionRegistrationSection = ({
   loadingVersions,
   loadingMoreVersions,
   loadMoreVersions,
+  setHasUnsavedChanges,
 }) => {
   const dateInputRef = useRef(null); 
 
@@ -32,6 +33,8 @@ export const DeveloperVersionRegistrationSection = ({
   const [rows, setRows] = useState([]);
   const [sqlScript, setSqlScript] = useState("");
   const [releaseNote, setReleaseNote] = useState("");
+  const [originalSqlScript, setOriginalSqlScript] = useState("");
+  const [originalReleaseNote, setOriginalReleaseNote] = useState("");
   
   const [alertMessage, setAlertMessage] = useState("");
   const [alertType, setAlertType] = useState("warning"); 
@@ -47,42 +50,55 @@ export const DeveloperVersionRegistrationSection = ({
     const prefix = selectedDate.replace(/-/g, '.');
     
     return versions
-      .filter(v => v.versionName === prefix || v.versionName.startsWith(prefix + '-'))
+      .filter(v => v.versionName.startsWith(prefix + '.'))
       .sort((a, b) => {
-        const aSuf = parseInt(a.versionName.split('-')[1] || "1", 10);
-        const bSuf = parseInt(b.versionName.split('-')[1] || "1", 10);
+        const partsA = a.versionName.split('.');
+        const partsB = b.versionName.split('.');
+        const aSuf = partsA.length > 3 ? parseInt(partsA[3], 10) : 1;
+        const bSuf = partsB.length > 3 ? parseInt(partsB[3], 10) : 1;
         return bSuf - aSuf;
       });
   }, [selectedDate, versions]); 
 
   const maxSuffix = availableVersions.length > 0
     ? Math.max(...availableVersions.map(v => {
-      if (v.versionName === selectedDate.replace(/-/g, '.')) return 0;
-      const parts = v.versionName.split('-');
-      return parts.length > 1 ? parseInt(parts[1], 10) : 0;
+      const parts = v.versionName.split('.');
+      return parts.length > 3 ? parseInt(parts[3], 10) : 0;
     }))
-    : -1; 
+    : 0; 
 
   const initializedVersionRef = useRef(false);
+
+  useEffect(() => {
+    if (setHasUnsavedChanges) {
+      const isRowsDirty = rows.some(row => row.dirty);
+      const isDocsDirty = sqlScript !== originalSqlScript || releaseNote !== originalReleaseNote;
+      setHasUnsavedChanges(isRowsDirty || isDocsDirty);
+    }
+  }, [rows, sqlScript, releaseNote, originalSqlScript, originalReleaseNote, setHasUnsavedChanges]);
 
   useEffect(() => {
     if (initializedVersionRef.current || versions.length === 0) return;
 
     const latestVersionName = versions[0].versionName;
-    const [datePart, suffix = ""] = latestVersionName.split('-');
-    setSelectedDate(datePart.replace(/\./g, '-'));
+    const parts = latestVersionName.split('.');
+    const datePart = parts.slice(0, 3).join('-');
+    const suffix = parts.length > 3 ? parts[3] : "";
+    setSelectedDate(datePart);
     setEditVersionMode(suffix);
     setModeType("edit");
     initializedVersionRef.current = true;
   }, [versions]);
 
   const selectedExistingVersionName = modeType === "edit"
-    ? `${selectedDate.replace(/-/g, '.')}${editVersionMode ? `-${editVersionMode}` : ''}`
+    ? `${selectedDate.replace(/-/g, '.')}${editVersionMode ? `.${editVersionMode}` : ''}`
     : "";
 
   const handleSelectExistingVersion = (versionName) => {
-    const [datePart, suffix = ""] = versionName.split('-');
-    setSelectedDate(datePart.replace(/\./g, '-'));
+    const parts = versionName.split('.');
+    const datePart = parts.slice(0, 3).join('-');
+    const suffix = parts.length > 3 ? parts[3] : "";
+    setSelectedDate(datePart);
     setEditVersionMode(suffix);
     setModeType("edit");
     setSubmitError("");
@@ -96,6 +112,8 @@ export const DeveloperVersionRegistrationSection = ({
     setRows([]);
     setSqlScript("");
     setReleaseNote(""); 
+    setOriginalSqlScript("");
+    setOriginalReleaseNote("");
     setSubmitError("");
     setLoadError("");
     setBaseStatus("");
@@ -148,7 +166,7 @@ export const DeveloperVersionRegistrationSection = ({
       setLoadError("");
       try {
         const prefix = selectedDate.replace(/-/g, '.');
-        const targetVersionName = editVersionMode ? `${prefix}-${editVersionMode}` : prefix;
+        const targetVersionName = editVersionMode ? `${prefix}.${editVersionMode}` : prefix;
 
         const detail = await getMainVersionDetail(targetVersionName);
 
@@ -156,11 +174,17 @@ export const DeveloperVersionRegistrationSection = ({
           setRows(buildRowsFromDetail(detail, true, true));
           setSqlScript(""); 
           setReleaseNote("");
+          setOriginalSqlScript("");
+          setOriginalReleaseNote("");
           setBaseStatus(`이전 버전(${targetVersionName})을 기반으로 새 버전을 작성합니다.`);
         } else {
           setRows(buildRowsFromDetail(detail, false, false));
-          setSqlScript(detail.mainVersion?.sqlScript || "");
-          setReleaseNote(detail.mainVersion?.releaseNote || "");
+          const initialSql = detail.mainVersion?.sqlScript || "";
+          const initialNote = detail.mainVersion?.releaseNote || "";
+          setSqlScript(initialSql);
+          setReleaseNote(initialNote);
+          setOriginalSqlScript(initialSql);
+          setOriginalReleaseNote(initialNote);
           setBaseStatus(`버전 ${targetVersionName} 수정 모드입니다. (오타 및 상태 수정 가능)`);
         }
       } catch (error) {
@@ -211,12 +235,19 @@ export const DeveloperVersionRegistrationSection = ({
     newRows.splice(targetIndex, 0, draggedItem);
 
     setRows(newRows.map((row, index) => {
-      const dirty = isRowChanged(row, index);
-      return {
-        ...row,
-        dirty,
-        status: row.originalStatus === "unchanged" ? (dirty ? "updated" : "unchanged") : row.status,
-      };
+      let tempRow = { ...row };
+      const isContentOrOrderChanged = !tempRow.originalValues || 
+        tempRow.subVersion !== tempRow.originalValues.subVersion ||
+        tempRow.component !== tempRow.originalValues.component ||
+        tempRow.tag !== tempRow.originalValues.tag ||
+        tempRow.note !== tempRow.originalValues.note ||
+        index !== tempRow.originalValues.sortOrder;
+        
+      if (tempRow.originalStatus === "unchanged") {
+        tempRow.status = isContentOrOrderChanged ? "updated" : "unchanged";
+      }
+      tempRow.dirty = isRowChanged(tempRow, index);
+      return tempRow;
     })); 
     setDraggedIndex(null); 
   };
@@ -235,6 +266,7 @@ export const DeveloperVersionRegistrationSection = ({
       || row.component !== row.originalValues.component
       || row.tag !== row.originalValues.tag
       || row.note !== row.originalValues.note
+      || row.status !== row.originalStatus
       || currentIndex !== row.originalValues.sortOrder;
   };
 
@@ -242,16 +274,23 @@ export const DeveloperVersionRegistrationSection = ({
     const newRows = [...rows]; 
     const nextRow = { ...newRows[index], [field]: value };
     
+    if (field === "subVersion" && value.trim().toUpperCase() === "EXT") {
+      nextRow.component = "";
+    }
+
     if (field !== "status") {
-      if (field === "subVersion" && value.trim().toUpperCase() === "EXT") {
-        nextRow.component = "";
-      }
-      nextRow.dirty = isRowChanged(nextRow, index);
-      
+      const isContentChanged = nextRow.subVersion !== nextRow.originalValues?.subVersion
+        || nextRow.component !== nextRow.originalValues?.component
+        || nextRow.tag !== nextRow.originalValues?.tag
+        || nextRow.note !== nextRow.originalValues?.note;
+        
       if (nextRow.originalStatus === "unchanged") {
-        nextRow.status = nextRow.dirty ? "updated" : "unchanged";
+        nextRow.status = isContentChanged ? "updated" : "unchanged";
       }
     }
+    
+    nextRow.dirty = isRowChanged(nextRow, index);
+    
     newRows[index] = nextRow;
     setRows(newRows);
   };
@@ -295,7 +334,8 @@ export const DeveloperVersionRegistrationSection = ({
 
   const handleRegisterMainVersion = async () => {
     const prefix = selectedDate.replace(/-/g, '.');
-    const targetVersionName = maxSuffix >= 0 ? `${prefix}-${maxSuffix + 1}` : prefix;
+    const nextSuffix = String(maxSuffix + 1).padStart(3, '0');
+    const targetVersionName = `${prefix}.${nextSuffix}`;
     setSaving(true);
     setSubmitError("");
 
@@ -304,6 +344,9 @@ export const DeveloperVersionRegistrationSection = ({
         releaseNote: releaseNote || undefined,
         sqlScript: sqlScript || undefined,
       });
+
+      setOriginalSqlScript(sqlScript);
+      setOriginalReleaseNote(releaseNote);
 
       const newSummary = {
         versionName: targetVersionName,
@@ -315,7 +358,7 @@ export const DeveloperVersionRegistrationSection = ({
       setSelectedVersionName(targetVersionName);
 
       setModeType("edit");
-      setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
+      setEditVersionMode(nextSuffix);
 
       setAlertType("success"); setAlertMessage(`신규 메인버전(${targetVersionName})이 등록되었습니다. 아래에서 매니페스트 상세 정보를 작성 후 각각 저장해주세요.`);
     } catch (error) {
@@ -325,7 +368,7 @@ export const DeveloperVersionRegistrationSection = ({
         setAlertType("warning"); setAlertMessage(message);
       } else {
         setModeType("edit");
-        setEditVersionMode(maxSuffix >= 0 ? (maxSuffix + 1).toString() : '');
+        setEditVersionMode(nextSuffix);
         setAlertType("warning"); setAlertMessage("이미 등록된 버전입니다. 수정 모드로 전환되었습니다.");
       }
     } finally {
@@ -341,12 +384,20 @@ export const DeveloperVersionRegistrationSection = ({
     }
 
     const prefix = selectedDate.replace(/-/g, '.');
-    const targetVersionName = (editVersionMode ? `${prefix}-${editVersionMode}` : prefix);
+    const targetVersionName = (editVersionMode ? `${prefix}.${editVersionMode}` : prefix);
     const desiredStatus = (row.status === "updated") ? "UPDATED" : (row.status === "pending") ? "PENDING" : "UNCHANGED";
 
-    if (row.dirty && desiredStatus === "UNCHANGED") {
+    const isImageTagChanged = !row.originalValues || row.component !== row.originalValues.component;
+
+    if (isImageTagChanged && desiredStatus === "UNCHANGED") {
       setAlertType("warning");
-      setAlertMessage("APP 정보가 변경되었습니다. STATUS를 UPDATED 또는 PENDING으로 선택해주세요.");
+      setAlertMessage("IMAGE TAG가 변경되었습니다. STATUS를 UPDATED 또는 PENDING으로 선택해주세요.");
+      return;
+    }
+
+    if (!isImageTagChanged && desiredStatus === "UPDATED" && row.subVersion.trim().toUpperCase() !== "EXT") {
+      setAlertType("warning");
+      setAlertMessage("IMAGE TAG가 기존 버전과 동일합니다. 이미지 태그를 변경하거나 상태를 UNCHANGED 또는 PENDING으로 설정해주세요.");
       return;
     }
 
@@ -370,7 +421,7 @@ export const DeveloperVersionRegistrationSection = ({
     setSubmitError("");
     try {
       await upsertSubVersion(targetVersionName, row.subVersion, payload);
-      setAlertType("warning"); setAlertMessage(`${row.subVersion} 컴포넌트 정보가 저장되었습니다.`);
+      setAlertType("success"); setAlertMessage(`${row.subVersion} 컴포넌트 정보가 저장되었습니다.`);
 
       const finalDetail = await getMainVersionDetail(targetVersionName);
       setRows(buildRowsFromDetail(finalDetail, false));
@@ -385,7 +436,7 @@ export const DeveloperVersionRegistrationSection = ({
 
   const handleUpdateMainVersionInfo = async () => {
     const prefix = selectedDate.replace(/-/g, '.');
-    const targetVersionName = editVersionMode ? `${prefix}-${editVersionMode}` : prefix;
+    const targetVersionName = editVersionMode ? `${prefix}.${editVersionMode}` : prefix;
 
     setSaving(true);
     setSubmitError("");
@@ -394,6 +445,8 @@ export const DeveloperVersionRegistrationSection = ({
         releaseNote,
         sqlScript,
       });
+      setOriginalSqlScript(sqlScript);
+      setOriginalReleaseNote(releaseNote);
       setAlertType("success");
       setAlertMessage(`메인버전 ${targetVersionName}의 배포 문서가 수정되었습니다.`);
     } catch (error) {
@@ -401,6 +454,75 @@ export const DeveloperVersionRegistrationSection = ({
       setSubmitError(message);
       setAlertType("warning");
       setAlertMessage(message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveAllRows = async () => {
+    const dirtyRows = rows.map((row, index) => ({ row, index })).filter(item => item.row.dirty);
+    
+    if (dirtyRows.length === 0) {
+      setAlertType("warning"); 
+      setAlertMessage("저장할 변경사항이 없습니다.");
+      return;
+    }
+
+    const invalidRow = dirtyRows.find(item => !item.row.tag);
+    if (invalidRow) {
+      setAlertType("warning"); 
+      setAlertMessage("버전(VERSION) 태그를 입력해야 저장할 수 있습니다. (컴포넌트: " + invalidRow.row.subVersion + ")");
+      return;
+    }
+
+    const prefix = selectedDate.replace(/-/g, '.');
+    const targetVersionName = (editVersionMode ? `${prefix}.${editVersionMode}` : prefix);
+
+    setSaving(true);
+    setSubmitError("");
+    
+    try {
+      for (const { row, index } of dirtyRows) {
+        const desiredStatus = (row.status === "updated") ? "UPDATED" : (row.status === "pending") ? "PENDING" : "UNCHANGED";
+        
+        const isImageTagChanged = !row.originalValues || row.component !== row.originalValues.component;
+
+        if (isImageTagChanged && desiredStatus === "UNCHANGED") {
+          throw new Error(`[${row.subVersion}] IMAGE TAG가 변경되었습니다. STATUS를 UPDATED 또는 PENDING으로 선택해주세요.`);
+        }
+
+        if (!isImageTagChanged && desiredStatus === "UPDATED" && row.subVersion.trim().toUpperCase() !== "EXT") {
+          throw new Error(`[${row.subVersion}] IMAGE TAG가 기존 버전과 동일합니다. 이미지 태그를 변경하거나 상태를 UNCHANGED 또는 PENDING으로 설정해주세요.`);
+        }
+
+        const payload = {
+          code: row.subVersion,
+          version: row.tag,
+          sortOrder: index,
+          submitStatus: desiredStatus, 
+        };
+
+        const finalNote = row.note ? row.note.trim() : "";
+        if (finalNote !== "") payload.note = finalNote;
+
+        if (row.subVersion.trim().toUpperCase() === "EXT") {
+          payload.imageTags = [];
+        } else if (row.component) {
+          payload.imageTags = row.component.split('\n').map(t => t.trim()).filter(Boolean);
+        }
+
+        await upsertSubVersion(targetVersionName, row.subVersion, payload);
+      }
+      
+      setAlertType("success"); 
+      setAlertMessage("모든 변경사항이 일괄 저장되었습니다.");
+
+      const finalDetail = await getMainVersionDetail(targetVersionName);
+      setRows(buildRowsFromDetail(finalDetail, false));
+    } catch (error) {
+      const message = error.payload?.message || error.message || "서브버전 일괄 저장 중 오류가 발생했습니다.";
+      setSubmitError(message);
+      setAlertType("warning"); setAlertMessage(message);
     } finally {
       setSaving(false);
     }
@@ -472,7 +594,7 @@ export const DeveloperVersionRegistrationSection = ({
               <div className="flex flex-col gap-2">
                 <span className="text-base font-bold text-slate-500 uppercase tracking-wider">생성될 버전명</span>
                 <div className="rounded-lg border border-indigo-200 bg-white py-3.5 px-4 text-lg font-bold text-indigo-700 text-center">
-                  {selectedDate.replace(/-/g, '.')}{maxSuffix >= 0 ? `-${maxSuffix + 1}` : ''}
+                  {selectedDate.replace(/-/g, '.')}.{String(maxSuffix + 1).padStart(3, '0')}
                 </div>
               </div>
             </div>
@@ -588,13 +710,15 @@ export const DeveloperVersionRegistrationSection = ({
                       <td className="px-4 py-3 border-b border-slate-100 min-w-[200px]">
                         <div className="flex items-center gap-2">
                           <div
-                            className="cursor-grab text-xs font-bold text-slate-400 hover:text-slate-600 p-1 select-none"
+                            className="cursor-grab text-slate-400 hover:text-slate-600 p-1 select-none flex items-center justify-center"
                             onMouseDown={() => enableDrag(index)} 
                             onMouseUp={() => disableDrag(index)} 
                             onMouseLeave={() => disableDrag(index)} 
                             title="드래그하여 순서 변경"
                           >
-                            이동
+                            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8h16M4 16h16" />
+                            </svg>
                           </div>
                           <div className="relative flex-1">
                             <input
@@ -675,20 +799,28 @@ export const DeveloperVersionRegistrationSection = ({
                               : "bg-white text-slate-500 border border-slate-200 hover:bg-slate-50 hover:text-slate-700"
                           } ${saving ? "opacity-50 cursor-not-allowed" : ""}`}
                         >
-                          {saving ? "저장중" : (row.dirty ? "저장 필요" : "저장 완료")}
+                          {saving ? "저장중" : (row.dirty ? "저장" : "저장 완료")}
                         </button>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-              <div className="p-4 bg-slate-50/50 flex justify-center border-t border-slate-200">
+              <div className="p-4 bg-slate-50/50 flex justify-center gap-4 border-t border-slate-200">
                 <button
                   type="button"
                   onClick={addRow}
                   className="py-2.5 px-6 flex items-center gap-2 text-sm font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-all"
                 >
                   <span>+</span> 빈 컴포넌트 행 추가
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAllRows}
+                  disabled={saving}
+                  className={`py-2.5 px-6 flex items-center gap-2 text-sm font-bold text-white bg-[#000666] hover:bg-[#090d82] border border-transparent rounded-lg transition-all ${saving ? "opacity-50 cursor-not-allowed" : ""}`}
+                >
+                  일괄저장
                 </button>
               </div>
             </div>

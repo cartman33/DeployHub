@@ -70,6 +70,30 @@ export const HtmlBody = () => {
   //버전 데이터를 불러오거나 처리할때 에러 발생시 에러 메세지 저장, 없으면 빈 문자열 저장
   const [versionError, setVersionError] = useState("");
 
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  const handleNavigation = (destination) => {
+    if (activeNavigation === destination) return;
+    if (hasUnsavedChanges) {
+      if (!window.confirm("저장하지 않은 변경사항이 있습니다. 정말로 다른 페이지로 이동하시겠습니까?\n이동하면 변경사항이 저장되지 않고 사라집니다.")) {
+        return;
+      }
+    }
+    setHasUnsavedChanges(false);
+    setActiveNavigation(destination);
+  };
+
 //useEffect 컴포넌트가 처음 화면에 나타나거나 배열 안의 상태(activeNavigation)의 변할때마다 실행 
   useEffect(() => {
     try {
@@ -306,7 +330,7 @@ export const HtmlBody = () => {
             <div className="flex items-center gap-3">
               <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shadow-inner">
                 <button
-                  onClick={() => setActiveNavigation("deployer")}
+                  onClick={() => handleNavigation("deployer")}
                   className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all ${
                     activeNavigation === "deployer" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
                   }`}
@@ -314,7 +338,7 @@ export const HtmlBody = () => {
                   배포자 모드
                 </button>
                 <button
-                  onClick={() => setActiveNavigation("job_management")}
+                  onClick={() => handleNavigation("job_management")}
                   className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all ${
                     activeNavigation === "job_management" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
                   }`}
@@ -324,7 +348,7 @@ export const HtmlBody = () => {
               </div>
               <div className="flex items-center p-1 bg-slate-100 rounded-lg border border-slate-200 shadow-inner">
                 <button
-                  onClick={() => setActiveNavigation("developer")}
+                  onClick={() => handleNavigation("developer")}
                   className={`px-4 py-1.5 text-sm font-extrabold rounded-md transition-all ${
                     activeNavigation === "developer" ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-700"
                   }`}
@@ -394,6 +418,7 @@ export const HtmlBody = () => {
               loadingVersions={loadingVersions}
               loadingMoreVersions={loadingMoreVersions}
               loadMoreVersions={loadMoreVersions}
+              setHasUnsavedChanges={setHasUnsavedChanges}
             />
           ) : (
             <JobManagementPage />
